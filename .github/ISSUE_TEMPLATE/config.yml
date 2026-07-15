@@ -1,0 +1,9 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/alyldas/form7-pdf-parser/security/advisories/new
+    about: Report vulnerabilities privately without production documents or personal data.
+  - name: Usage question
+    url: https://github.com/alyldas/form7-pdf-parser/discussions
+    about: Ask privacy-safe usage questions in Discussions.
+

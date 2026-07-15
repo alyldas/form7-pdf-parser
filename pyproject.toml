@@ -1,0 +1,83 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "form7-pdf-parser"
+version = "0.1.0"
+description = "Parse text-based Form 7 shipping PDFs and add page labels."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "alyldas" }]
+keywords = ["form7", "pdf", "parser", "shipping", "cli"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Typing :: Typed",
+]
+dependencies = [
+  "pypdf>=6.14.2,<7",
+  "reportlab>=4.2,<5",
+]
+
+[project.optional-dependencies]
+dev = [
+  "build>=1.2",
+  "mypy>=1.15",
+  "pytest>=8.3",
+  "pytest-cov>=6",
+  "ruff>=0.11",
+  "twine>=6.1",
+  "types-reportlab>=4.4",
+]
+
+[project.scripts]
+form7-pdf = "form7_pdf_parser.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/alyldas/form7-pdf-parser"
+Documentation = "https://github.com/alyldas/form7-pdf-parser#readme"
+Issues = "https://github.com/alyldas/form7-pdf-parser/issues"
+Repository = "https://github.com/alyldas/form7-pdf-parser.git"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/form7_pdf_parser"]
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-config --strict-markers --cov=form7_pdf_parser --cov-report=term-missing --cov-fail-under=95"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+source = ["form7_pdf_parser"]
+omit = ["src/form7_pdf_parser/__main__.py"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["B", "E", "F", "I", "RUF", "S", "SIM", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/form7_pdf_parser/parsing.py" = ["RUF001"]
+"tests/**/*.py" = ["RUF001", "S101"]
+"tools/generate_fixture.py" = ["RUF001"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src"]
