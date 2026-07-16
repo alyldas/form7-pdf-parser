@@ -191,6 +191,16 @@ def test_parse_tracking_number_accepts_valid_prefix_before_text(text: str) -> No
     assert parse_tracking_number(text) == "12345678901234"
 
 
+def test_parse_tracking_number_keeps_partial_prefix_before_text() -> None:
+    text = """Оплачивается при вручении 123456 отправление
+78
+90123
+4
+"""
+
+    assert parse_tracking_number(text) == "12345678901234"
+
+
 def test_parse_tracking_number_returns_first_valid_candidate() -> None:
     text = """Оплачивается при вручении
 123456 78 90123 4
@@ -287,7 +297,9 @@ def test_parse_recipient_returns_phone_when_name_block_is_empty() -> None:
         ("71234567890123", None),
         ("123456, 12, 34", None),
         ("Телефон справочной службы +70000000000", None),
+        ("Телефон службы поддержки +70000000000", None),
         ("phone support +70000000000", None),
+        ("phone customer support +70000000000", None),
     ],
 )
 def test_parse_recipient_classifies_phone_candidate(
@@ -312,10 +324,37 @@ def test_parse_recipient_ignores_text_after_merged_phone(suffix: str) -> None:
     )
 
 
-@pytest.mark.parametrize("label", ["Телефон:", "Телефон получателя:", "phone recipient:"])
+@pytest.mark.parametrize(
+    "label",
+    [
+        "Телефон:",
+        "Телефон получателя:",
+        "Контактный телефон получателя:",
+        "телефон для связи:",
+        "phone recipient:",
+    ],
+)
 def test_parse_recipient_strips_phone_label_before_trailing_text(label: str) -> None:
     assert parse_recipient_name_address_phone([f"{label} +7 (000) 000-00-00 получатель"]) == (
         None,
+        None,
+        "0000000000",
+    )
+
+
+@pytest.mark.parametrize(
+    ("line", "expected_name"),
+    [
+        ("100 руб 00 коп +7 (000) 000-00-00", None),
+        ("100 руб 00 коп Тестов +7 (000) 000-00-00 получатель", "Тестов"),
+    ],
+)
+def test_parse_recipient_strips_amount_before_merged_phone(
+    line: str,
+    expected_name: str | None,
+) -> None:
+    assert parse_recipient_name_address_phone([line]) == (
+        expected_name,
         None,
         "0000000000",
     )
@@ -367,7 +406,13 @@ def test_parse_recipient_skips_phone_shaped_service_line_before_recipient(
 
 @pytest.mark.parametrize(
     "service_label",
-    ["Телефон справочной службы", "Номер заказа", "phone support"],
+    [
+        "Телефон справочной службы",
+        "Телефон службы поддержки",
+        "Номер заказа",
+        "phone customer support",
+        "phone support",
+    ],
 )
 def test_parse_recipient_skips_split_service_phone_before_recipient(
     service_label: str,
@@ -384,6 +429,37 @@ def test_parse_recipient_skips_split_service_phone_before_recipient(
     assert parse_recipient_name_address_phone(lines) == (
         "Тестов Тест Тестович",
         "000000, г. Примерск",
+        "0000000000",
+    )
+
+
+def test_parse_recipient_skips_phone_substring_after_numeric_prefix() -> None:
+    lines = [
+        "100 руб 00 коп",
+        "123456 900 123 45 67",
+        "Тестов Тест Тестович",
+        "000000, г. Примерск",
+        "+7 (000) 000-00-00",
+    ]
+
+    assert parse_recipient_name_address_phone(lines) == (
+        "Тестов Тест Тестович",
+        "000000, г. Примерск",
+        "0000000000",
+    )
+
+
+def test_parse_recipient_preserves_numeric_address_without_phone_substring() -> None:
+    lines = [
+        "100 руб 00 коп",
+        "Тестов Тест Тестович",
+        "123456, 12, 34",
+        "+7 (000) 000-00-00",
+    ]
+
+    assert parse_recipient_name_address_phone(lines) == (
+        "Тестов Тест Тестович",
+        "123456, 12, 34",
         "0000000000",
     )
 

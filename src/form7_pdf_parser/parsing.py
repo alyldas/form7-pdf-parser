@@ -18,14 +18,15 @@ _TRACKING_DATE_PREAMBLE_PATTERN = re.compile(r"(?:0[1-9]|[12]\d|3[01])(?:0[1-9]|
 _AMOUNT_PATTERN = re.compile(r"\b(?:руб|коп)\b", flags=re.IGNORECASE)
 _PHONE_DASH_PATTERN = re.compile(r"[‐‑‒–—―−﹘﹣－]")
 _PHONE_LABEL_PATTERN = re.compile(
-    r"^(?:тел(?:ефон)?|phone)\b\.?\s*:?\s*"
-    r"(?:(?:получател|адресат)\w*|recipient)?\s*:?\s*",
+    r"^(?:контактн\w*\s+)?(?:тел(?:ефон)?|phone)\b\.?\s*:?\s*"
+    r"(?:(?:(?:получател|адресат)\w*|recipient)|(?:для\s+связи))?\s*:?\s*",
     flags=re.IGNORECASE,
 )
 _NON_RECIPIENT_PHONE_PREFIX_PATTERN = re.compile(
     r"^(?:"
     r"(?:номер|код)\s+(?:заказ|заявк)\w*"
-    r"|(?:тел(?:ефон)?|phone)\.?\s*:?\s*"
+    r"|(?:контактн\w*\s+)?(?:тел(?:ефон)?|phone)\b\.?\s*:?\s*"
+    r"(?:(?:служб|техническ|клиентск|customer|technical)\w*\s+){0,2}"
     r"(?:справочн|поддержк|support)\w*"
     r")\b",
     flags=re.IGNORECASE,
@@ -175,7 +176,6 @@ def _find_tracking_parts(
 
         remainder = candidate[numeric_prefix.end() :]
         has_trailing_amount = bool(_AMOUNT_PATTERN.search(remainder))
-        line_token_start = len(tokens)
         line_tokens = numeric_prefix.group().split()
         for token_index, digits in enumerate(line_tokens):
             tokens.append(
@@ -191,7 +191,6 @@ def _find_tracking_parts(
                 break
             if tracking_match := _tracking_tokens_match(tokens):
                 return tracking_match
-            del tokens[line_token_start:]
 
     return _tracking_tokens_match(tokens)
 
@@ -208,6 +207,13 @@ def parse_tracking_number(text: str, lines: list[str] | None = None) -> str | No
 def _join_lines(lines: list[str]) -> str | None:
     compact = re.sub(r"\s+", " ", " ".join(line.strip() for line in lines if line.strip()))
     return compact.strip() or None
+
+
+def _strip_amount_prefix(prefix: str) -> str | None:
+    amount_matches = tuple(_AMOUNT_PATTERN.finditer(prefix))
+    if not amount_matches:
+        return prefix
+    return prefix[amount_matches[-1].end() :].lstrip(" :—-,") or None
 
 
 def _phone_digits(line: str) -> str | None:
@@ -227,6 +233,21 @@ def _phone_digits(line: str) -> str | None:
     return digits[-10:]
 
 
+def _has_phone_substring_after_numeric_prefix(line: str) -> bool:
+    normalized_line = _PHONE_DASH_PATTERN.sub("-", line)
+    for candidate_start in _PHONE_CANDIDATE_START_PATTERN.finditer(normalized_line):
+        candidate_match = _PHONE_CHARACTERS_PATTERN.match(
+            normalized_line,
+            candidate_start.start(),
+        )
+        if candidate_match is None or _phone_digits(candidate_match.group().strip()) is None:
+            continue
+        prefix = normalized_line[: candidate_start.start()].strip()
+        if prefix and re.search(r"[^\W\d_]", prefix) is None:
+            return True
+    return False
+
+
 def _phone_match(line: str) -> tuple[str, str | None] | None:
     normalized_line = _PHONE_DASH_PATTERN.sub("-", line)
     if phone_digits := _phone_digits(normalized_line):
@@ -244,6 +265,10 @@ def _phone_match(line: str) -> tuple[str, str | None] | None:
             prefix = line[: candidate_start.start()].strip() or None
             if prefix is not None and _NON_RECIPIENT_PHONE_PREFIX_PATTERN.match(prefix):
                 continue
+            if prefix is not None and re.search(r"[^\W\d_]", prefix) is None:
+                continue
+            if prefix is not None:
+                prefix = _strip_amount_prefix(prefix)
             if prefix is not None:
                 prefix = _PHONE_LABEL_PATTERN.sub("", prefix, count=1).strip() or None
             return phone_digits, prefix
@@ -263,6 +288,9 @@ def _without_non_recipient_phone_lines(lines: list[str]) -> list[str]:
     for line in lines:
         if _NON_RECIPIENT_PHONE_PREFIX_PATTERN.match(line):
             skip_split_phone = True
+            continue
+        if _has_phone_substring_after_numeric_prefix(line):
+            skip_split_phone = False
             continue
         if skip_split_phone and _phone_match(line) is not None:
             skip_split_phone = False
