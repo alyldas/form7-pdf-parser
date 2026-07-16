@@ -25,7 +25,7 @@ def test_annotate_pdf_adds_sanitized_label_and_uses_owner_only_mode(tmp_path: Pa
 
     reader = PdfReader(output)
     assert len(reader.pages) == 2
-    assert "6904" in (reader.pages[0].extract_text() or "")
+    assert "Order #6904" in (reader.pages[0].extract_text() or "")
     assert stat.S_IMODE(output.stat().st_mode) == 0o600
 
 
@@ -67,6 +67,11 @@ def test_annotate_pdf_rejects_non_positive_page(tmp_path: Path) -> None:
         annotate_pdf(FIXTURE, tmp_path / "output.pdf", [Overlay(0, "0")])
 
 
+def test_annotate_pdf_rejects_overlong_normalized_label(tmp_path: Path) -> None:
+    with pytest.raises(OverlayError, match="64 characters"):
+        annotate_pdf(FIXTURE, tmp_path / "output.pdf", [Overlay(1, "A" * 65)])
+
+
 def test_annotate_pdf_rejects_same_input_and_output() -> None:
     with pytest.raises(OverlayError, match="different"):
         annotate_pdf(FIXTURE, FIXTURE, [])
@@ -105,8 +110,9 @@ def test_annotate_pdf_wraps_invalid_pdf_errors(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("label", "expected"),
     [
-        ("Order #6904", "6904"),
+        ("Order #6904", "Order #6904"),
         ("  SAFE / LABEL  ", "SAFE / LABEL"),
+        ("Заказ № 6904", "6904"),
         ("Только текст", ""),
         ("", ""),
     ],

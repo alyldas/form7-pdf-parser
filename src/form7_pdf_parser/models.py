@@ -1,6 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import StrEnum
+
+
+class PageValidationIssue(StrEnum):
+    MISSING_TRACKING_NUMBER = "missing_tracking_number"
+    MISSING_RECIPIENT = "missing_recipient"
 
 
 @dataclass(frozen=True, slots=True)
@@ -12,6 +18,7 @@ class ParsedPage:
     tracking_number: str | None
     raw_text: str | None
     is_valid: bool
+    validation_issues: tuple[PageValidationIssue, ...] = ()
 
     def as_dict(self) -> dict[str, object]:
         return {
