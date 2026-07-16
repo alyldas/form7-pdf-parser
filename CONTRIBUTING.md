@@ -30,8 +30,8 @@ twine check dist/*
 ## Commits and releases
 
 The repository uses squash merges. Pull request titles become the commits on `main`, so they
-must follow `type(scope?): lowercase summary`. Use `fix:` for patches, `feat:` for minor
-releases, and `!` or a `BREAKING CHANGE:` footer for major releases. See the
+must follow `type(scope?): lowercase summary`. Use `fix:` or `docs:` for patches, `feat:` for
+minor releases, and `!` or a `BREAKING CHANGE:` footer for major releases. See the
 [release process](docs/release-process.md) for examples and recovery guidance.
 
 Describe public API and JSON schema changes in the pull request. Release Please updates the

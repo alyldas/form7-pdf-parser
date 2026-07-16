@@ -4,10 +4,10 @@ Describe the behavior and why the change is needed.
 
 ## Release impact
 
-- [ ] Patch release (`fix:`)
+- [ ] Patch release (`fix:` or `docs:`)
 - [ ] Minor release (`feat:`)
 - [ ] Major release (`!` or `BREAKING CHANGE:`)
-- [ ] No release (`chore:`, `docs:`, `test:`, or `refactor:`)
+- [ ] No release (`chore:`, `test:`, or `refactor:`)
 
 Expected squash commit title: `type(scope?): lowercase summary`
 
