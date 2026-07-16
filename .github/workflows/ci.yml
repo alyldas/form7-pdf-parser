@@ -7,11 +7,6 @@ on:
     branches: [main]
     types: [opened, synchronize, reopened, edited, ready_for_review]
   workflow_dispatch:
-    inputs:
-      pr-title:
-        description: Conventional Commit title to validate for an automated release PR.
-        required: false
-        type: string
 
 permissions:
   contents: read
@@ -22,11 +17,11 @@ concurrency:
 
 jobs:
   conventional-commit:
-    if: ${{ github.event_name == 'pull_request' || inputs['pr-title'] != '' }}
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 2
     env:
-      PR_TITLE: ${{ github.event.pull_request.title || inputs['pr-title'] }}
+      PR_TITLE: ${{ github.event.pull_request.title }}
     steps:
       - name: Validate Conventional Commit title
         shell: python

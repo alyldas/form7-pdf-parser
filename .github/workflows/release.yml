@@ -13,7 +13,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      actions: write
       contents: write
       issues: write
       pull-requests: write
@@ -21,22 +20,22 @@ jobs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
+      - name: Verify the release token
+        env:
+          RELEASE_PLEASE_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+        run: |
+          if [ -z "$RELEASE_PLEASE_TOKEN" ]; then
+            echo "::error::Configure the RELEASE_PLEASE_TOKEN repository secret."
+            exit 1
+          fi
+
       - name: Create or update the release pull request
         id: release
         uses: googleapis/release-please-action@v5
         with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
-
-      - name: Run required checks for the release pull request
-        if: steps.release.outputs.prs_created == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_PR: ${{ steps.release.outputs.pr }}
-        run: |
-          branch="$(python -c 'import json, os; print(json.loads(os.environ["RELEASE_PR"])["headBranchName"])')"
-          title="$(python -c 'import json, os; print(json.loads(os.environ["RELEASE_PR"])["title"])')"
-          gh workflow run ci.yml --ref "$branch" -f "pr-title=$title"
 
   release-assets:
     needs: release-please

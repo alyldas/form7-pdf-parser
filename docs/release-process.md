@@ -26,8 +26,9 @@ chore(deps): update development dependencies
 - `chore:`, `docs:`, `test:`, and `refactor:` normally create no release.
 
 The required title and package checks run for every pull request. Release Please uses the
-built-in workflow token, so its own release pull request explicitly dispatches the same checks
-against the release branch.
+`RELEASE_PLEASE_TOKEN` repository secret so its release pull requests trigger the same checks.
+Use a fine-grained token limited to this repository with read/write access to contents and pull
+requests. Issue write access is also needed for release lifecycle labels.
 
 ## Publishing
 
