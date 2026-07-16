@@ -74,7 +74,7 @@ jobs:
 
   package:
     needs: [quality, tests]
-    if: ${{ always() }}
+    if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

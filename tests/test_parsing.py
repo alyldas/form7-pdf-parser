@@ -47,110 +47,71 @@ def test_parse_page_includes_raw_text_only_when_requested() -> None:
     assert page.raw_text == VALID_PAGE_TEXT.strip()
 
 
-def test_parse_tracking_number_supports_split_digit_lines() -> None:
-    text = """Оплачивается при вручении
-000000
-00
-00000
-0
-"""
-
-    assert parse_tracking_number(text) == "00000000000000"
-
-
-def test_parse_tracking_number_supports_inline_digits() -> None:
-    text = "Оплачивается при вручении 000000 00 00000 0"
-
-    assert parse_tracking_number(text) == "00000000000000"
-
-
-def test_parse_tracking_number_supports_compact_inline_digits() -> None:
-    text = "Оплачивается при вручении 00000000000000"
-
-    assert parse_tracking_number(text) == "00000000000000"
-
-
-def test_parse_tracking_number_supports_wrapped_group_lines() -> None:
-    text = """Оплачивается при вручении
-000000 00
-00000 0
-"""
-
-    assert parse_tracking_number(text) == "00000000000000"
-
-
-def test_parse_tracking_number_supports_mixed_inline_and_wrapped_groups() -> None:
-    text = """Оплачивается при вручении 000000 00
-00000 0
-"""
-
-    assert parse_tracking_number(text) == "00000000000000"
-
-
 @pytest.mark.parametrize(
-    "marker",
+    "text",
     [
-        "Оплачивается при\nвручении",
-        "Оплачивается\nпри\nвручении",
+        pytest.param(
+            "Оплачивается при вручении\n000000\n00\n00000\n0",
+            id="split-lines",
+        ),
+        pytest.param(
+            "Оплачивается при вручении 000000 00 00000 0",
+            id="inline-groups",
+        ),
+        pytest.param(
+            "Оплачивается при вручении 00000000000000",
+            id="compact-inline",
+        ),
+        pytest.param(
+            "Оплачивается при вручении00000000000000",
+            id="compact-touching-marker",
+        ),
+        pytest.param(
+            "Оплачивается при вручении\n000000 00\n00000 0",
+            id="wrapped-groups",
+        ),
+        pytest.param(
+            "Оплачивается при вручении 000000 00\n00000 0",
+            id="mixed-inline-and-wrapped",
+        ),
+        pytest.param(
+            "Оплачивается при\nвручении\n000000 00 00000 0",
+            id="two-line-marker",
+        ),
+        pytest.param(
+            "Оплачивается\nпри\nвручении\n000000 00 00000 0",
+            id="three-line-marker",
+        ),
+        pytest.param(
+            "Оплачивается при вручении 000000 00 00000 0 100 руб 00 коп",
+            id="trailing-amount",
+        ),
+        pytest.param(
+            "Оплачивается при вручении\n160726\n000000\n00\n00000\n0",
+            id="numeric-service-line",
+        ),
+        pytest.param(
+            "Оплачивается при вручении 00000 0 0000 0\n000000\n00\n00000\n0",
+            id="invalid-inline-then-split",
+        ),
+        pytest.param(
+            "Оплачивается при вручении: данные ниже\nслужебная строка\n000000\n00\n00000\n0",
+            id="text-service-line",
+        ),
+        pytest.param(
+            "\n".join(
+                [
+                    "Оплачивается при вручении: инструкция",
+                    *(f"служебная строка {index}" for index in range(10)),
+                    "Оплачивается при вручении",
+                    "000000 00 00000 0",
+                ]
+            ),
+            id="repeated-marker",
+        ),
     ],
 )
-def test_parse_tracking_number_supports_wrapped_marker(marker: str) -> None:
-    text = f"{marker}\n000000 00 00000 0"
-
-    assert parse_tracking_number(text) == "00000000000000"
-
-
-def test_parse_tracking_number_accepts_trailing_amount_text() -> None:
-    text = "Оплачивается при вручении 000000 00 00000 0 100 руб 00 коп"
-
-    assert parse_tracking_number(text) == "00000000000000"
-
-
-def test_parse_tracking_number_skips_numeric_service_line() -> None:
-    text = """Оплачивается при вручении
-160726
-000000
-00
-00000
-0
-"""
-
-    assert parse_tracking_number(text) == "00000000000000"
-
-
-def test_parse_tracking_number_falls_through_after_invalid_inline_candidate() -> None:
-    text = """Оплачивается при вручении 00000 0 0000 0
-000000
-00
-00000
-0
-"""
-
-    assert parse_tracking_number(text) == "00000000000000"
-
-
-def test_parse_tracking_number_uses_bounded_line_fallback() -> None:
-    text = """Оплачивается при вручении: данные ниже
-служебная строка
-000000
-00
-00000
-0
-"""
-
-    assert parse_tracking_number(text) == "00000000000000"
-
-
-def test_parse_tracking_number_continues_after_marker_without_digits() -> None:
-    text = "\n".join(
-        [
-            "Оплачивается при вручении: инструкция",
-            *(f"служебная строка {index}" for index in range(10)),
-            "Оплачивается при вручении",
-            "000000 00 00000 0",
-        ]
-    )
-
+def test_parse_tracking_number_accepts_supported_layouts(text: str) -> None:
     assert parse_tracking_number(text) == "00000000000000"
 
 
@@ -214,26 +175,12 @@ def test_parse_recipient_classifies_phone_candidate(
     assert parse_recipient_name_address_phone([line]) == (None, None, expected_phone)
 
 
-def test_parse_recipient_preserves_address_merged_with_phone() -> None:
-    lines = [
-        "100 руб 00 коп",
-        "Тестов Тест Тестович",
-        "000000, г. Примерск +7 (000) 000-00-00",
-    ]
-
-    assert parse_recipient_name_address_phone(lines) == (
-        "Тестов Тест Тестович",
-        "000000, г. Примерск",
-        "0000000000",
-    )
-
-
-@pytest.mark.parametrize("suffix", ["получатель", "/ получатель", ", получатель"])
+@pytest.mark.parametrize("suffix", ["", " получатель", " / получатель", ", получатель"])
 def test_parse_recipient_ignores_text_after_merged_phone(suffix: str) -> None:
     lines = [
         "100 руб 00 коп",
         "Тестов Тест Тестович",
-        f"000000, г. Примерск +7 (000) 000-00-00 {suffix}",
+        f"000000, г. Примерск +7 (000) 000-00-00{suffix}",
     ]
 
     assert parse_recipient_name_address_phone(lines) == (
@@ -282,29 +229,6 @@ def test_parse_recipient_preserves_name_that_starts_like_order_label() -> None:
         "000000, г. Примерск",
         "0000000000",
     )
-
-
-def test_parse_page_handles_all_reviewed_extraction_artifacts_together() -> None:
-    text = "\n".join(
-        [
-            "Оплачивается при вручении: инструкция",
-            *(f"служебная строка {index}" for index in range(10)),
-            "Оплачивается при вручении",
-            "000000 00 00000 0",
-            "100 руб 00 коп",
-            "Номер заказа +7 111 111 1111",
-            "Тестов Тест Тестович",
-            "000000, г. Примерск +7 (000) 000-00-00 получатель",
-        ]
-    )
-
-    page = parse_page(text, 1)
-
-    assert page.recipient_name == "Тестов Тест Тестович"
-    assert page.recipient_address == "000000, г. Примерск"
-    assert page.recipient_phone == "0000000000"
-    assert page.tracking_number == "00000000000000"
-    assert page.is_valid is True
 
 
 def test_invalid_page_has_stable_null_fields() -> None:

@@ -5,33 +5,22 @@ import re
 from .models import PageValidationIssue, ParsedPage
 
 _TRACKING_MARKER_PATTERN = re.compile(
-    r"\bОплачивается\s+при\s+вручении\b",
+    r"\bОплачивается\s+при\s+вручении(?![^\W\d])",
     flags=re.IGNORECASE,
 )
-_TRACKING_MARKER_MAX_LINES = 3
 _TRACKING_PART_LENGTHS = ((5, 7), (1, 3), (4, 6), (1, 1))
 _AMOUNT_PATTERN = re.compile(r"\b(?:руб|коп)\b", flags=re.IGNORECASE)
 _PHONE_DASH_PATTERN = re.compile(r"[‐‑‒–—―−﹘﹣－]")
 _PHONE_LABEL_PATTERN = re.compile(
-    r"^(?:тел(?:ефон)?|phone)\.?\s*:?\s*",
-    flags=re.IGNORECASE,
-)
-_RECIPIENT_PHONE_PREFIX_PATTERN = re.compile(
     r"^(?:тел(?:ефон)?|phone)\.?\s*:?\s*"
-    r"(?:(?:получател|адресат)\w*|recipient)?\s*:?\s*$",
+    r"(?:(?:получател|адресат)\w*|recipient)?\s*:?\s*",
     flags=re.IGNORECASE,
 )
 _NON_RECIPIENT_PHONE_PREFIX_PATTERN = re.compile(
     r"^(?:"
-    r"(?:номер|№|код|идентификатор)\s+"
-    r"(?:заказ|заявк|договор|отправлен)\w*"
-    r"|(?:заказ|заявк)\w*\s+(?:номер|№|код|id)"
-    r"|order\s+(?:number|no\.?|id)"
+    r"(?:номер|код)\s+(?:заказ|заявк)\w*"
     r"|(?:тел(?:ефон)?|phone)\.?\s*:?\s*"
-    r"(?:справочн|служб|поддержк|горяч|контактн|support|help|hotline|customer)\w*"
-    r"|(?:справочн\w*\s+служб\w*|служб\w*\s+поддержк\w*"
-    r"|горяч\w*\s+лини\w*|контактн\w*\s+центр\w*"
-    r"|support|help\s+desk|hotline|customer\s+service)"
+    r"(?:справочн|поддержк|support)\w*"
     r")\b",
     flags=re.IGNORECASE,
 )
@@ -60,25 +49,11 @@ def _tracking_marker_matches(lines: list[str]) -> list[tuple[int, str]]:
     joined_lines = "\n".join(lines)
     matches: list[tuple[int, str]] = []
     for match in _TRACKING_MARKER_PATTERN.finditer(joined_lines):
-        if match.group().count("\n") >= _TRACKING_MARKER_MAX_LINES:
-            continue
-
         marker_end = joined_lines.count("\n", 0, match.end())
         marker_tail = joined_lines[match.end() :].split("\n", 1)[0]
         matches.append((marker_end, marker_tail))
 
     return matches
-
-
-def _find_tracking_marker(
-    lines: list[str],
-    *,
-    reverse: bool = False,
-) -> tuple[int, str] | None:
-    matches = _tracking_marker_matches(lines)
-    if not matches:
-        return None
-    return matches[-1] if reverse else matches[0]
 
 
 def _find_tracking_parts(
@@ -173,8 +148,6 @@ def _phone_match(line: str) -> tuple[str, str | None] | None:
             prefix = line[: candidate_start.start()].strip() or None
             if prefix is not None and _NON_RECIPIENT_PHONE_PREFIX_PATTERN.match(prefix):
                 continue
-            if prefix is not None and _RECIPIENT_PHONE_PREFIX_PATTERN.match(prefix):
-                prefix = None
             return phone_digits, prefix
 
     return None
@@ -201,11 +174,11 @@ def _find_recipient_phone(
 
 
 def _trim_tracking_preamble(lines: list[str]) -> list[str]:
-    marker_match = _find_tracking_marker(lines, reverse=True)
-    if marker_match is None:
+    marker_matches = _tracking_marker_matches(lines)
+    if not marker_matches:
         return lines
 
-    marker_end, marker_tail = marker_match
+    marker_end, marker_tail = marker_matches[-1]
     tracking_match = _find_tracking_parts(lines, marker_end, marker_tail)
     if tracking_match is None:
         return lines[marker_end + 1 :]
