@@ -29,7 +29,7 @@ PDFs and adding order labels to their pages.
 Download the wheel from the [latest release](../../releases/latest), then install it:
 
 ```bash
-python -m pip install form7_pdf_parser-0.1.0-py3-none-any.whl
+python -m pip install ./form7_pdf_parser-*.whl
 ```
 
 For development:

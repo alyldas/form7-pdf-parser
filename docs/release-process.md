@@ -20,10 +20,10 @@ docs: clarify synthetic fixture requirements
 chore(deps): update development dependencies
 ```
 
-- `fix:` creates a patch release.
+- `fix:` or `docs:` creates a patch release.
 - `feat:` creates a minor release.
 - `type!:` or a `BREAKING CHANGE:` footer creates a major release.
-- `chore:`, `docs:`, `test:`, and `refactor:` normally create no release.
+- `chore:`, `test:`, and `refactor:` normally create no release.
 
 The required title and package checks run for every pull request. Release Please uses the
 `RELEASE_PLEASE_TOKEN` repository secret so its release pull requests trigger the same checks.
@@ -35,6 +35,11 @@ requests. Issue write access is also needed for release lifecycle labels.
 Merge the release pull request when the accumulated changes should be published. Release Please
 creates the GitHub release and tag, then the same workflow builds, verifies, and attaches the
 wheel and source distribution.
+
+If asset creation or upload fails after the GitHub release exists, re-run the failed workflow
+jobs. The workflow finds the release tag on the original commit and safely replaces any partial
+assets. To rebuild assets for a specific release, run the Release Please workflow manually and
+provide its existing tag in the `release_tag` input.
 
 ## Recovery
 

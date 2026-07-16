@@ -4,12 +4,18 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing release tag whose assets should be rebuilt
+        required: false
+        type: string
 
 permissions:
   contents: read
 
 jobs:
   release-please:
+    if: github.event_name == 'push' || inputs.release_tag == ''
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -39,7 +45,14 @@ jobs:
 
   release-assets:
     needs: release-please
-    if: needs.release-please.outputs.release_created == 'true'
+    if: >-
+      ${{
+        always() &&
+        (
+          needs.release-please.result == 'success' ||
+          (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
+        )
+      }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -47,16 +60,47 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ needs.release-please.outputs.tag_name }}
+          fetch-depth: 0
+          ref: ${{ inputs.release_tag || needs.release-please.outputs.tag_name || github.sha }}
+      - name: Resolve the release tag
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_TAG: ${{ inputs.release_tag || needs.release-please.outputs.tag_name }}
+        run: |
+          tag_name="$REQUESTED_TAG"
+
+          if [ -z "$tag_name" ]; then
+            while IFS= read -r candidate; do
+              if gh release view "$candidate" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+                tag_name="$candidate"
+                break
+              fi
+            done < <(git tag --points-at "$GITHUB_SHA")
+          fi
+
+          if [ -z "$tag_name" ]; then
+            echo "release_found=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          gh release view "$tag_name" --repo "$GITHUB_REPOSITORY" >/dev/null
+          echo "release_found=true" >> "$GITHUB_OUTPUT"
+          echo "tag_name=$tag_name" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-python@v6
+        if: steps.release.outputs.release_found == 'true'
         with:
           python-version: "3.14"
           cache: pip
-      - run: python -m pip install --upgrade pip build twine
-      - run: python -m build
-      - run: twine check dist/*
+      - if: steps.release.outputs.release_found == 'true'
+        run: python -m pip install --upgrade pip build twine
+      - if: steps.release.outputs.release_found == 'true'
+        run: python -m build
+      - if: steps.release.outputs.release_found == 'true'
+        run: twine check dist/*
       - name: Attach distributions to the release
+        if: steps.release.outputs.release_found == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
+          TAG_NAME: ${{ steps.release.outputs.tag_name }}
         run: gh release upload "$TAG_NAME" dist/*.whl dist/*.tar.gz --clobber
