@@ -64,6 +64,29 @@ def test_parse_tracking_number_supports_inline_digits() -> None:
     assert parse_tracking_number(text) == "00000000000000"
 
 
+def test_parse_tracking_number_supports_compact_inline_digits() -> None:
+    text = "Оплачивается при вручении 00000000000000"
+
+    assert parse_tracking_number(text) == "00000000000000"
+
+
+def test_parse_tracking_number_supports_wrapped_group_lines() -> None:
+    text = """Оплачивается при вручении
+000000 00
+00000 0
+"""
+
+    assert parse_tracking_number(text) == "00000000000000"
+
+
+def test_parse_tracking_number_supports_mixed_inline_and_wrapped_groups() -> None:
+    text = """Оплачивается при вручении 000000 00
+00000 0
+"""
+
+    assert parse_tracking_number(text) == "00000000000000"
+
+
 def test_parse_tracking_number_skips_numeric_service_line() -> None:
     text = """Оплачивается при вручении
 160726

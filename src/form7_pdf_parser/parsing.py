@@ -5,11 +5,6 @@ import re
 from .models import PageValidationIssue, ParsedPage
 
 _TRACKING_MARKER = "Оплачивается при вручении"
-_INLINE_TRACKING_PATTERN = re.compile(
-    r"Оплачивается\s+при\s+вручении\s*(?:[:—-]\s*)?"
-    r"([0-9]{5,7})\s+([0-9]{1,3})\s+([0-9]{4,6})\s+([0-9])(?:\s|$)",
-    flags=re.IGNORECASE,
-)
 _TRACKING_PART_LENGTHS = ((5, 7), (1, 3), (4, 6), (1, 1))
 _AMOUNT_PATTERN = re.compile(r"\b(?:руб|коп)\b", flags=re.IGNORECASE)
 _PHONE_LABEL_PATTERN = re.compile(
@@ -41,13 +36,22 @@ def _find_tracking_parts(
     marker_index: int,
 ) -> tuple[str, int] | None:
     parts: list[tuple[int, str]] = []
-    for line_index in range(marker_index + 1, min(marker_index + 10, len(lines))):
-        line = lines[line_index]
-        digits = re.sub(r"\s+", "", line) if re.fullmatch(r"[0-9\s]+", line) else ""
-        if len(digits) == 14:
-            return digits, line_index + 1
-        if re.fullmatch(r"\d{1,7}", digits):
-            parts.append((line_index, digits))
+    marker_line = lines[marker_index]
+    marker_start = marker_line.casefold().index(_TRACKING_MARKER.casefold())
+    marker_end = marker_start + len(_TRACKING_MARKER)
+
+    for line_index in range(marker_index, min(marker_index + 10, len(lines))):
+        candidate = lines[line_index]
+        if line_index == marker_index:
+            candidate = candidate[marker_end:].lstrip(" :—-")
+        if not re.fullmatch(r"[0-9\s]+", candidate):
+            continue
+
+        for digits in candidate.split():
+            if len(digits) == 14:
+                return digits, line_index + 1
+            if re.fullmatch(r"\d{1,7}", digits):
+                parts.append((line_index, digits))
 
     for start in range(len(parts) - 3):
         candidate_parts = parts[start : start + 4]
@@ -80,12 +84,6 @@ def parse_tracking_number(text: str, lines: list[str] | None = None) -> str | No
     )
     if marker_index is None:
         return None
-
-    inline_match = _INLINE_TRACKING_PATTERN.search(normalized_lines[marker_index])
-    if inline_match:
-        inline_tracking_number = _valid_tracking_number(inline_match.groups())
-        if inline_tracking_number is not None:
-            return inline_tracking_number
 
     tracking_match = _find_tracking_parts(normalized_lines, marker_index)
     return tracking_match[0] if tracking_match is not None else None
