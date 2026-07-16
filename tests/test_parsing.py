@@ -291,6 +291,24 @@ def test_parse_recipient_strips_phone_label_before_trailing_text(label: str) -> 
 
 
 @pytest.mark.parametrize(
+    "prefix",
+    ["Телегин Иван", "Телефонов Иван", "Телефонная ул.", "phonebook entry"],
+)
+def test_parse_recipient_preserves_phone_label_prefix_words(prefix: str) -> None:
+    lines = [
+        "100 руб 00 коп",
+        "Тестов Тест Тестович",
+        f"{prefix} +7 (000) 000-00-00 получатель",
+    ]
+
+    assert parse_recipient_name_address_phone(lines) == (
+        "Тестов Тест Тестович",
+        prefix,
+        "0000000000",
+    )
+
+
+@pytest.mark.parametrize(
     "service_line",
     [
         "Номер заказа +7 111 111 1111",

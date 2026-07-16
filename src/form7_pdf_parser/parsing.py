@@ -17,7 +17,7 @@ _TRACKING_LABEL_PATTERN = re.compile(r"^(?:№|N[oº]?\.?)\s*:?\s*", flags=re.IG
 _AMOUNT_PATTERN = re.compile(r"\b(?:руб|коп)\b", flags=re.IGNORECASE)
 _PHONE_DASH_PATTERN = re.compile(r"[‐‑‒–—―−﹘﹣－]")
 _PHONE_LABEL_PATTERN = re.compile(
-    r"^(?:тел(?:ефон)?|phone)\.?\s*:?\s*"
+    r"^(?:тел(?:ефон)?|phone)\b\.?\s*:?\s*"
     r"(?:(?:получател|адресат)\w*|recipient)?\s*:?\s*",
     flags=re.IGNORECASE,
 )
