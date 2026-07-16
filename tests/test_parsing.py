@@ -58,6 +58,35 @@ def test_parse_tracking_number_supports_split_digit_lines() -> None:
     assert parse_tracking_number(text) == "00000000000000"
 
 
+def test_parse_tracking_number_supports_inline_digits() -> None:
+    text = "Оплачивается при вручении 000000 00 00000 0"
+
+    assert parse_tracking_number(text) == "00000000000000"
+
+
+def test_parse_tracking_number_skips_numeric_service_line() -> None:
+    text = """Оплачивается при вручении
+160726
+000000
+00
+00000
+0
+"""
+
+    assert parse_tracking_number(text) == "00000000000000"
+
+
+def test_parse_tracking_number_falls_through_after_invalid_inline_candidate() -> None:
+    text = """Оплачивается при вручении 00000 0 0000 0
+000000
+00
+00000
+0
+"""
+
+    assert parse_tracking_number(text) == "00000000000000"
+
+
 def test_parse_tracking_number_uses_bounded_line_fallback() -> None:
     text = """Оплачивается при вручении: данные ниже
 служебная строка
@@ -103,7 +132,13 @@ def test_parse_recipient_returns_phone_when_name_block_is_empty() -> None:
         ("80000000000", "0000000000"),
         ("8 0000000000", "0000000000"),
         ("+7(000)0000000", "0000000000"),
+        ("+7 (000) 000-0000", "0000000000"),
+        ("+7 000 000 0000", "0000000000"),
         ("000.000.00.00", "0000000000"),
+        ("000 000 0000", "0000000000"),
+        ("7 000 000 0000", "0000000000"),
+        ("8 000 000 0000", "0000000000"),
+        ("8-000-000-0000", "0000000000"),
         ("Телефон: 0000000000", "0000000000"),
         ("0000000000", None),
         ("60000000000", None),

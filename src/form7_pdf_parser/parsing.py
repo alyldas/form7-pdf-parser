@@ -5,10 +5,10 @@ import re
 from .models import PageValidationIssue, ParsedPage
 
 _TRACKING_MARKER = "Оплачивается при вручении"
-_TRACKING_PATTERN = re.compile(
-    r"Оплачивается\s+при\s+вручении\s*"
-    r"([0-9]{5,7})\s*([0-9]{1,3})\s*([0-9]{4,6})\s*([0-9])",
-    flags=re.IGNORECASE | re.DOTALL,
+_INLINE_TRACKING_PATTERN = re.compile(
+    r"Оплачивается\s+при\s+вручении\s*(?:[:—-]\s*)?"
+    r"([0-9]{5,7})\s+([0-9]{1,3})\s+([0-9]{4,6})\s+([0-9])(?:\s|$)",
+    flags=re.IGNORECASE,
 )
 _TRACKING_PART_LENGTHS = ((5, 7), (1, 3), (4, 6), (1, 1))
 _AMOUNT_PATTERN = re.compile(r"\b(?:руб|коп)\b", flags=re.IGNORECASE)
@@ -20,8 +20,8 @@ _PHONE_CHARACTERS_PATTERN = re.compile(r"[+\d\s().-]+")
 _FORMATTED_PHONE_PATTERN = re.compile(
     r"^(?:(?:\+?7|8)[\s.-]*)?"
     r"(?:"
-    r"\(\d{3}\)[\s.-]*\d{3}[\s.-]*\d{2}[\s.-]*\d{2}"
-    r"|\d{3}[\s.-]+\d{3}[\s.-]+\d{2}[\s.-]+\d{2}"
+    r"\(\d{3}\)[\s.-]*\d{3}[\s.-]*(?:\d{4}|\d{2}[\s.-]*\d{2})"
+    r"|\d{3}[\s.-]+\d{3}[\s.-]+(?:\d{4}|\d{2}[\s.-]+\d{2})"
     r")$"
 )
 _COMPACT_PHONE_PATTERN = re.compile(r"^(?:\+7|[78])[\s.-]?\d{10}$")
@@ -69,10 +69,6 @@ def _find_tracking_parts(
 
 
 def parse_tracking_number(text: str, lines: list[str] | None = None) -> str | None:
-    match = _TRACKING_PATTERN.search(text)
-    if match:
-        return _valid_tracking_number(match.groups())
-
     normalized_lines = lines if lines is not None else normalize_lines(text)
     marker_index = next(
         (
@@ -84,6 +80,12 @@ def parse_tracking_number(text: str, lines: list[str] | None = None) -> str | No
     )
     if marker_index is None:
         return None
+
+    inline_match = _INLINE_TRACKING_PATTERN.search(normalized_lines[marker_index])
+    if inline_match:
+        inline_tracking_number = _valid_tracking_number(inline_match.groups())
+        if inline_tracking_number is not None:
+            return inline_tracking_number
 
     tracking_match = _find_tracking_parts(normalized_lines, marker_index)
     return tracking_match[0] if tracking_match is not None else None
