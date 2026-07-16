@@ -74,9 +74,17 @@ jobs:
 
   package:
     needs: [quality, tests]
+    if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - name: Verify prerequisite jobs
+        env:
+          QUALITY_RESULT: ${{ needs.quality.result }}
+          TESTS_RESULT: ${{ needs.tests.result }}
+        run: |
+          test "$QUALITY_RESULT" = success
+          test "$TESTS_RESULT" = success
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:

@@ -95,8 +95,27 @@ def test_parse_recipient_returns_phone_when_name_block_is_empty() -> None:
     )
 
 
-def test_parse_recipient_rejects_unformatted_numeric_candidate() -> None:
-    assert parse_recipient_name_address_phone(["1234567890"]) == (None, None, None)
+@pytest.mark.parametrize(
+    ("line", "expected_phone"),
+    [
+        ("+70000000000", "0000000000"),
+        ("70000000000", "0000000000"),
+        ("80000000000", "0000000000"),
+        ("8 0000000000", "0000000000"),
+        ("+7(000)0000000", "0000000000"),
+        ("000.000.00.00", "0000000000"),
+        ("Телефон: 0000000000", "0000000000"),
+        ("0000000000", None),
+        ("60000000000", None),
+        ("123456, 12, 34", None),
+        ("Телефон справочной службы +70000000000", None),
+    ],
+)
+def test_parse_recipient_classifies_phone_candidate(
+    line: str,
+    expected_phone: str | None,
+) -> None:
+    assert parse_recipient_name_address_phone([line]) == (None, None, expected_phone)
 
 
 def test_invalid_page_has_stable_null_fields() -> None:

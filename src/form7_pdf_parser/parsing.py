@@ -18,11 +18,13 @@ _PHONE_LABEL_PATTERN = re.compile(
 )
 _PHONE_CHARACTERS_PATTERN = re.compile(r"[+\d\s().-]+")
 _FORMATTED_PHONE_PATTERN = re.compile(
-    r"^(?:(?:\+?7|8)[\s-]*)?"
-    r"(?:\(\d{3}\)[\s-]*|\d{3}[\s-]+)"
-    r"\d{3}[\s-]+\d{2}[\s-]+\d{2}$"
+    r"^(?:(?:\+?7|8)[\s.-]*)?"
+    r"(?:"
+    r"\(\d{3}\)[\s.-]*\d{3}[\s.-]*\d{2}[\s.-]*\d{2}"
+    r"|\d{3}[\s.-]+\d{3}[\s.-]+\d{2}[\s.-]+\d{2}"
+    r")$"
 )
-_COMPACT_INTERNATIONAL_PHONE_PATTERN = re.compile(r"^\+7\d{10}$")
+_COMPACT_PHONE_PATTERN = re.compile(r"^(?:\+7|[78])[\s.-]?\d{10}$")
 
 
 def normalize_lines(text: str) -> list[str]:
@@ -102,8 +104,7 @@ def _phone_digits(line: str) -> str | None:
     if len(digits) not in (10, 11):
         return None
     if label_match is None and not (
-        _FORMATTED_PHONE_PATTERN.fullmatch(value)
-        or _COMPACT_INTERNATIONAL_PHONE_PATTERN.fullmatch(value)
+        _FORMATTED_PHONE_PATTERN.fullmatch(value) or _COMPACT_PHONE_PATTERN.fullmatch(value)
     ):
         return None
     return digits[-10:]
