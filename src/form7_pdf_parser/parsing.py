@@ -23,6 +23,38 @@ def _valid_tracking_number(parts: list[str] | tuple[str, ...]) -> str | None:
     return candidate if len(candidate) == 14 and candidate.isdigit() else None
 
 
+def _find_tracking_parts(
+    lines: list[str],
+    marker_index: int,
+) -> tuple[str, int] | None:
+    parts: list[tuple[int, str]] = []
+    for line_index in range(marker_index + 1, min(marker_index + 10, len(lines))):
+        line = lines[line_index]
+        digits = re.sub(r"\s+", "", line) if re.fullmatch(r"[0-9\s]+", line) else ""
+        if len(digits) == 14:
+            return digits, line_index + 1
+        if re.fullmatch(r"\d{1,7}", digits):
+            parts.append((line_index, digits))
+
+    for start in range(len(parts) - 3):
+        candidate_parts = parts[start : start + 4]
+        if not all(
+            minimum <= len(part) <= maximum
+            for (_, part), (minimum, maximum) in zip(
+                candidate_parts,
+                _TRACKING_PART_LENGTHS,
+                strict=True,
+            )
+        ):
+            continue
+
+        tracking_number = _valid_tracking_number([part for _, part in candidate_parts])
+        if tracking_number is not None:
+            return tracking_number, candidate_parts[-1][0] + 1
+
+    return None
+
+
 def parse_tracking_number(text: str, lines: list[str] | None = None) -> str | None:
     match = _TRACKING_PATTERN.search(text)
     if match:
@@ -40,25 +72,8 @@ def parse_tracking_number(text: str, lines: list[str] | None = None) -> str | No
     if marker_index is None:
         return None
 
-    parts: list[str] = []
-    for line in normalized_lines[marker_index + 1 : marker_index + 10]:
-        digits = re.sub(r"\s+", "", line) if re.fullmatch(r"[0-9\s]+", line) else ""
-        if re.fullmatch(r"\d{1,7}", digits):
-            parts.append(digits)
-
-    for start in range(len(parts) - 3):
-        candidate_parts = parts[start : start + 4]
-        if all(
-            minimum <= len(part) <= maximum
-            for part, (minimum, maximum) in zip(
-                candidate_parts,
-                _TRACKING_PART_LENGTHS,
-                strict=True,
-            )
-        ):
-            return _valid_tracking_number(candidate_parts)
-
-    return None
+    tracking_match = _find_tracking_parts(normalized_lines, marker_index)
+    return tracking_match[0] if tracking_match is not None else None
 
 
 def _join_lines(lines: list[str]) -> str | None:
@@ -67,6 +82,8 @@ def _join_lines(lines: list[str]) -> str | None:
 
 
 def _phone_digits(line: str) -> str | None:
+    if any(character.isalpha() for character in line):
+        return None
     digits = re.sub(r"\D+", "", line)
     return digits[-10:] if len(digits) in (10, 11) else None
 
@@ -99,17 +116,10 @@ def _trim_tracking_preamble(lines: list[str]) -> list[str]:
     if marker_index is None:
         return lines
 
-    candidate_lines = lines[marker_index + 1 :]
-    tracking_digits = 0
-    for index, line in enumerate(candidate_lines):
-        if re.fullmatch(r"[0-9\s]+", line):
-            tracking_digits += len(re.sub(r"\s+", "", line))
-            if tracking_digits >= 14:
-                return candidate_lines[index + 1 :]
-        elif tracking_digits:
-            return candidate_lines[index:]
-
-    return candidate_lines
+    tracking_match = _find_tracking_parts(lines, marker_index)
+    if tracking_match is None:
+        return lines[marker_index + 1 :]
+    return lines[tracking_match[1] :]
 
 
 def parse_recipient_name_address_phone(
