@@ -1,11 +1,29 @@
-__pycache__/
-*.py[cod]
+# Build and packaging
 *.egg-info/
+build/
+dist/
+
+# Coverage
 .coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Local work files
+work/
+
+# Operating system metadata
+.DS_Store
+
+# Python bytecode
+*.py[cod]
+__pycache__/
+
+# Tool caches
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
+
+# Virtual environments
 .venv/
-build/
-dist/
-.DS_Store
+venv/

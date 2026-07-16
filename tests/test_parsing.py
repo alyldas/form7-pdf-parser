@@ -5,8 +5,13 @@ from pathlib import Path
 
 import pytest
 
-from form7_pdf_parser import PageValidationIssue, parse_page, parse_recipient_name_address_phone
-from form7_pdf_parser.parsing import normalize_lines, parse_tracking_number
+from form7_pdf_parser import PageValidationIssue
+from form7_pdf_parser.parsing import (
+    normalize_lines,
+    parse_page,
+    parse_recipient_name_address_phone,
+    parse_tracking_number,
+)
 
 PARSING_CASES = json.loads(
     (Path(__file__).parent / "fixtures" / "parsing-cases.json").read_text(encoding="utf-8")
@@ -67,6 +72,17 @@ def test_parse_tracking_number_uses_bounded_line_fallback() -> None:
 
 def test_parse_tracking_number_rejects_non_fourteen_digit_candidate() -> None:
     text = "Оплачивается при вручении 00000 0 0000 0"
+
+    assert parse_tracking_number(text) is None
+
+
+def test_parse_tracking_number_rejects_invalid_split_part_lengths() -> None:
+    text = """Оплачивается при вручении: данные ниже
+0000
+00
+00000
+0
+"""
 
     assert parse_tracking_number(text) is None
 

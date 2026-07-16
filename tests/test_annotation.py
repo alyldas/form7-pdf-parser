@@ -12,8 +12,8 @@ from form7_pdf_parser import (
     PdfLimitError,
     PdfReadError,
     annotate_pdf,
-    normalize_overlay_label,
 )
+from form7_pdf_parser.annotation import normalize_overlay_label
 
 FIXTURE = Path(__file__).parent / "fixtures" / "synthetic-form7.pdf"
 
@@ -80,6 +80,11 @@ def test_annotate_pdf_rejects_same_input_and_output() -> None:
 def test_annotate_pdf_rejects_invalid_page_limit(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="max_pages"):
         annotate_pdf(FIXTURE, tmp_path / "output.pdf", [], max_pages=0)
+
+
+def test_annotate_pdf_rejects_invalid_file_size_limit(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="max_file_size"):
+        annotate_pdf(FIXTURE, tmp_path / "output.pdf", [], max_file_size=0)
 
 
 def test_annotate_pdf_enforces_page_limit(tmp_path: Path) -> None:
