@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
-from form7_pdf_parser import parse_page, parse_recipient_name_address_phone
+from form7_pdf_parser import PageValidationIssue, parse_page, parse_recipient_name_address_phone
 from form7_pdf_parser.parsing import normalize_lines, parse_tracking_number
+
+PARSING_CASES = json.loads(
+    (Path(__file__).parent / "fixtures" / "parsing-cases.json").read_text(encoding="utf-8")
+)
 
 VALID_PAGE_TEXT = """Synthetic Form 7 fixture
 Оплачивается при вручении
@@ -26,6 +33,7 @@ def test_parse_page_extracts_synthetic_recipient_without_raw_text() -> None:
     assert page.tracking_number == "00000000000000"
     assert page.raw_text is None
     assert page.is_valid is True
+    assert page.validation_issues == ()
 
 
 def test_parse_page_includes_raw_text_only_when_requested() -> None:
@@ -83,6 +91,27 @@ def test_invalid_page_has_stable_null_fields() -> None:
         "raw_text": None,
         "is_valid": False,
     }
+    assert page.validation_issues == (
+        PageValidationIssue.MISSING_TRACKING_NUMBER,
+        PageValidationIssue.MISSING_RECIPIENT,
+    )
+
+
+@pytest.mark.parametrize("case", PARSING_CASES, ids=lambda case: case["name"])
+def test_synthetic_parsing_matrix(case: dict[str, object]) -> None:
+    expected = case["expected"]
+    assert isinstance(expected, dict)
+
+    page = parse_page(str(case["text"]), 1)
+
+    assert page.recipient_name == expected["recipient_name"]
+    assert page.recipient_address == expected["recipient_address"]
+    assert page.recipient_phone == expected["recipient_phone"]
+    assert page.tracking_number == expected["tracking_number"]
+    assert page.is_valid is expected["is_valid"]
+    assert page.validation_issues == tuple(
+        PageValidationIssue(issue) for issue in expected["validation_issues"]
+    )
 
 
 def test_normalize_lines_removes_blank_lines_and_compacts_whitespace() -> None:

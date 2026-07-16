@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 
-from .models import ParsedPage
+from .models import PageValidationIssue, ParsedPage
 
 _TRACKING_MARKER = "Оплачивается при вручении"
 _TRACKING_PATTERN = re.compile(
@@ -92,6 +92,19 @@ def parse_recipient_name_address_phone(
     return recipient_block[0], _join_lines(recipient_block[1:]), phone_digits
 
 
+def _page_validation_issues(
+    tracking_number: str | None,
+    recipient_name: str | None,
+    recipient_phone: str | None,
+) -> tuple[PageValidationIssue, ...]:
+    issues: list[PageValidationIssue] = []
+    if tracking_number is None:
+        issues.append(PageValidationIssue.MISSING_TRACKING_NUMBER)
+    if recipient_name is None and recipient_phone is None:
+        issues.append(PageValidationIssue.MISSING_RECIPIENT)
+    return tuple(issues)
+
+
 def parse_page(text: str, page_number: int, *, include_raw_text: bool = False) -> ParsedPage:
     if page_number < 1:
         raise ValueError("page_number must be at least 1")
@@ -99,6 +112,11 @@ def parse_page(text: str, page_number: int, *, include_raw_text: bool = False) -
     lines = normalize_lines(text)
     tracking_number = parse_tracking_number(text, lines)
     recipient_name, recipient_address, recipient_phone = parse_recipient_name_address_phone(lines)
+    validation_issues = _page_validation_issues(
+        tracking_number,
+        recipient_name,
+        recipient_phone,
+    )
 
     return ParsedPage(
         page_number=page_number,
@@ -107,6 +125,6 @@ def parse_page(text: str, page_number: int, *, include_raw_text: bool = False) -
         recipient_address=recipient_address,
         tracking_number=tracking_number,
         raw_text=text.strip() or None if include_raw_text else None,
-        is_valid=tracking_number is not None
-        and (recipient_name is not None or recipient_phone is not None),
+        is_valid=not validation_issues,
+        validation_issues=validation_issues,
     )

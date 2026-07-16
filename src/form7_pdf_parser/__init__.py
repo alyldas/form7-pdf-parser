@@ -1,7 +1,7 @@
 from ._version import __version__
 from .annotation import annotate_pdf, normalize_overlay_label
 from .exceptions import Form7Error, OverlayError, PdfLimitError, PdfReadError
-from .models import Overlay, ParsedPage, ParseResult
+from .models import Overlay, PageValidationIssue, ParsedPage, ParseResult
 from .parsing import parse_page, parse_recipient_name_address_phone, parse_tracking_number
 from .pdf import parse_pdf
 
@@ -9,6 +9,7 @@ __all__ = [
     "Form7Error",
     "Overlay",
     "OverlayError",
+    "PageValidationIssue",
     "ParseResult",
     "ParsedPage",
     "PdfLimitError",

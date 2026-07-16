@@ -16,15 +16,13 @@ from .exceptions import OverlayError, PdfLimitError, PdfReadError
 from .models import Overlay
 from .pdf import DEFAULT_MAX_FILE_SIZE, DEFAULT_MAX_PAGES, enforce_source_size
 
+MAX_OVERLAY_LABEL_LENGTH = 64
+
 
 def normalize_overlay_label(label: str) -> str:
     compact = re.sub(r"\s+", " ", label).strip()
     if not compact:
         return ""
-
-    digits = re.sub(r"\D+", "", compact)
-    if digits:
-        return digits
 
     ascii_only = re.sub(r"[^A-Za-z0-9#\-_/ ]+", "", compact)
     return re.sub(r"\s+", " ", ascii_only).strip()
@@ -54,6 +52,10 @@ def _overlay_map(overlays: Iterable[Overlay]) -> dict[int, str]:
             raise OverlayError(f"Duplicate overlay for page {overlay.page_number}")
 
         label = normalize_overlay_label(overlay.order_label)
+        if len(label) > MAX_OVERLAY_LABEL_LENGTH:
+            raise OverlayError(
+                f"Overlay labels must not exceed {MAX_OVERLAY_LABEL_LENGTH} characters"
+            )
         if label:
             result[overlay.page_number] = label
 

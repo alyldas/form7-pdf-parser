@@ -78,6 +78,10 @@ form7-pdf annotate \
   --output annotated.pdf
 ```
 
+Labels retain ASCII letters, digits, spaces, `#`, `-`, `_`, and `/`. Other characters are
+removed, empty normalized labels are ignored, and normalized labels longer than 64 characters
+are rejected.
+
 Successful commands return `0`, processing failures return `1`, and invalid command-line
 arguments return `2`. Errors are written to standard error.
 
@@ -89,6 +93,8 @@ from form7_pdf_parser import Overlay, annotate_pdf, parse_pdf
 result = parse_pdf("form7.pdf")
 for page in result.pages:
     print(page.page_number, page.tracking_number, page.is_valid)
+    if not page.is_valid:
+        print([issue.value for issue in page.validation_issues])
 
 annotate_pdf(
     "form7.pdf",
@@ -96,6 +102,10 @@ annotate_pdf(
     [Overlay(page_number=1, order_label="Order #6904")],
 )
 ```
+
+Invalid Python results expose typed `validation_issues` values such as
+`missing_tracking_number` and `missing_recipient`. They are intentionally omitted from the
+stable JSON contract below; JSON consumers can continue to rely on `is_valid`.
 
 The JSON contract is intentionally small and stable:
 
