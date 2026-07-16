@@ -87,6 +87,25 @@ def test_parse_tracking_number_supports_mixed_inline_and_wrapped_groups() -> Non
     assert parse_tracking_number(text) == "00000000000000"
 
 
+@pytest.mark.parametrize(
+    "marker",
+    [
+        "Оплачивается при\nвручении",
+        "Оплачивается\nпри\nвручении",
+    ],
+)
+def test_parse_tracking_number_supports_wrapped_marker(marker: str) -> None:
+    text = f"{marker}\n000000 00 00000 0"
+
+    assert parse_tracking_number(text) == "00000000000000"
+
+
+def test_parse_tracking_number_accepts_trailing_amount_text() -> None:
+    text = "Оплачивается при вручении 000000 00 00000 0 100 руб 00 коп"
+
+    assert parse_tracking_number(text) == "00000000000000"
+
+
 def test_parse_tracking_number_skips_numeric_service_line() -> None:
     text = """Оплачивается при вручении
 160726
@@ -162,6 +181,9 @@ def test_parse_recipient_returns_phone_when_name_block_is_empty() -> None:
         ("7 000 000 0000", "0000000000"),
         ("8 000 000 0000", "0000000000"),
         ("8-000-000-0000", "0000000000"),
+        ("+7 (000) 000‑00‑00", "0000000000"),
+        ("+7 (000) 000–00–00", "0000000000"),
+        ("+7 (000) 000−00−00", "0000000000"),
         ("Телефон: 0000000000", "0000000000"),
         ("0000000000", None),
         ("60000000000", None),
@@ -174,6 +196,20 @@ def test_parse_recipient_classifies_phone_candidate(
     expected_phone: str | None,
 ) -> None:
     assert parse_recipient_name_address_phone([line]) == (None, None, expected_phone)
+
+
+def test_parse_recipient_preserves_address_merged_with_phone() -> None:
+    lines = [
+        "100 руб 00 коп",
+        "Тестов Тест Тестович",
+        "000000, г. Примерск +7 (000) 000-00-00",
+    ]
+
+    assert parse_recipient_name_address_phone(lines) == (
+        "Тестов Тест Тестович",
+        "000000, г. Примерск",
+        "0000000000",
+    )
 
 
 def test_invalid_page_has_stable_null_fields() -> None:

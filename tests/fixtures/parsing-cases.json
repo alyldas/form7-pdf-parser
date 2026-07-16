@@ -84,6 +84,30 @@
     }
   },
   {
+    "name": "missing-amount-with-wrapped-tracking-marker",
+    "text": "Оплачивается при\nвручении\n000000 00 00000 0\nТестов Тест Тестович\n000000, г. Примерск\n+7 (000) 000-00-00\n",
+    "expected": {
+      "recipient_name": "Тестов Тест Тестович",
+      "recipient_address": "000000, г. Примерск",
+      "recipient_phone": "0000000000",
+      "tracking_number": "00000000000000",
+      "is_valid": true,
+      "validation_issues": []
+    }
+  },
+  {
+    "name": "inline-tracking-before-trailing-amount",
+    "text": "Оплачивается при вручении 000000 00 00000 0 100 руб 00 коп\nТестов Тест Тестович\n000000, г. Примерск\n+7 (000) 000-00-00\n",
+    "expected": {
+      "recipient_name": "Тестов Тест Тестович",
+      "recipient_address": "000000, г. Примерск",
+      "recipient_phone": "0000000000",
+      "tracking_number": "00000000000000",
+      "is_valid": true,
+      "validation_issues": []
+    }
+  },
+  {
     "name": "missing-amount-with-numeric-service-line",
     "text": "Оплачивается при вручении: данные ниже\n2026\n000000\n00\n00000\n0\nТестов Тест Тестович\n000000, г. Примерск\n+7 (000) 000-00-00\n",
     "expected": {
@@ -146,6 +170,30 @@
   {
     "name": "three-three-four-phone-before-footer-phone",
     "text": "Оплачивается при вручении\n000000 00 00000 0\n100 руб 00 коп\nТестов Тест Тестович\n000000, г. Примерск\n+7 000 000 0000\nТелефон справочной службы\n+7 (111) 111-11-11\n",
+    "expected": {
+      "recipient_name": "Тестов Тест Тестович",
+      "recipient_address": "000000, г. Примерск",
+      "recipient_phone": "0000000000",
+      "tracking_number": "00000000000000",
+      "is_valid": true,
+      "validation_issues": []
+    }
+  },
+  {
+    "name": "unicode-dash-phone-before-footer-phone",
+    "text": "Оплачивается при вручении\n000000 00 00000 0\n100 руб 00 коп\nТестов Тест Тестович\n000000, г. Примерск\n+7 (000) 000‑00‑00\nТелефон справочной службы\n+7 (111) 111-11-11\n",
+    "expected": {
+      "recipient_name": "Тестов Тест Тестович",
+      "recipient_address": "000000, г. Примерск",
+      "recipient_phone": "0000000000",
+      "tracking_number": "00000000000000",
+      "is_valid": true,
+      "validation_issues": []
+    }
+  },
+  {
+    "name": "address-and-phone-on-one-line-before-footer-phone",
+    "text": "Оплачивается при вручении\n000000 00 00000 0\n100 руб 00 коп\nТестов Тест Тестович\n000000, г. Примерск +7 (000) 000-00-00\nТелефон справочной службы\n+7 (111) 111-11-11\n",
     "expected": {
       "recipient_name": "Тестов Тест Тестович",
       "recipient_address": "000000, г. Примерск",
