@@ -1,0 +1,25 @@
+name: Dependency audit
+
+on:
+  push:
+    branches: [main]
+    paths: [pyproject.toml]
+  pull_request:
+    branches: [main]
+    paths: [pyproject.toml]
+  schedule:
+    - cron: "27 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pypa/gh-action-pip-audit@v1.1.0
+        with:
+          inputs: .
