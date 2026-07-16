@@ -12,6 +12,7 @@ _TRACKING_PATTERN = re.compile(
 )
 _TRACKING_PART_LENGTHS = ((5, 7), (1, 3), (4, 6), (1, 1))
 _AMOUNT_PATTERN = re.compile(r"\b(?:руб|коп)\b", flags=re.IGNORECASE)
+_PHONE_LABEL_PATTERN = re.compile(r"\b(?:тел(?:ефон)?|phone)\b", flags=re.IGNORECASE)
 
 
 def normalize_lines(text: str) -> list[str]:
@@ -82,7 +83,7 @@ def _join_lines(lines: list[str]) -> str | None:
 
 
 def _phone_digits(line: str) -> str | None:
-    if any(character.isalpha() for character in line):
+    if any(character.isalpha() for character in line) and not _PHONE_LABEL_PATTERN.search(line):
         return None
     digits = re.sub(r"\D+", "", line)
     return digits[-10:] if len(digits) in (10, 11) else None
