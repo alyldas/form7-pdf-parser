@@ -2,8 +2,12 @@
 
 ## Supported versions
 
-Security fixes are provided only for the latest release. Older releases are unsupported;
-upgrade before reporting or validating a vulnerability.
+Security fixes are provided for the latest minor release.
+
+| Version | Supported |
+| --- | --- |
+| 0.1.x | Yes |
+| Older | No |
 
 ## Reporting a vulnerability
 
@@ -21,3 +25,4 @@ reproducibility, and affected versions before a coordinated fix is prepared.
 This package parses complex PDF input and should not be treated as a security sandbox. For
 untrusted files, run it in an isolated process with CPU, memory, file-size, and execution-time
 limits. The package performs no network requests or telemetry.
+

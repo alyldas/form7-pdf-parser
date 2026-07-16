@@ -16,6 +16,18 @@ The format follows Keep a Changelog 1.1.0, and the project uses Semantic Version
 
 * **release:** made release automation retry-safe ([#6](https://github.com/alyldas/form7-pdf-parser/issues/6)) ([8c00c45](https://github.com/alyldas/form7-pdf-parser/commit/8c00c4511311d3fba6b0efc842597a82ade06c9a))
 
+## [Unreleased]
+
+### Added
+
+- Typed validation issues for invalid parsed pages without changing the JSON contract.
+- A table-driven synthetic parsing corpus covering valid, partial, and invalid layouts.
+
+### Changed
+
+- Overlay labels now preserve allowed ASCII text around digits and reject normalized labels
+  longer than 64 characters.
+
 ## [0.1.0] - 2026-07-15
 
 ### Added

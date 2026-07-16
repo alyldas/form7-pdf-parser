@@ -15,7 +15,6 @@ from .models import Overlay
 from .pdf import DEFAULT_MAX_FILE_SIZE, DEFAULT_MAX_PAGES, parse_pdf
 
 MAX_OVERLAY_JSON_SIZE = 1024 * 1024
-_DEFAULT_MAX_FILE_SIZE_MIB = DEFAULT_MAX_FILE_SIZE // (1024 * 1024)
 
 
 def _positive_int(value: str) -> int:
@@ -23,21 +22,6 @@ def _positive_int(value: str) -> int:
     if parsed < 1:
         raise argparse.ArgumentTypeError("value must be positive")
     return parsed
-
-
-def _add_limit_arguments(command: argparse.ArgumentParser) -> None:
-    command.add_argument(
-        "--max-pages",
-        type=_positive_int,
-        default=DEFAULT_MAX_PAGES,
-        help=f"Maximum number of PDF pages (default: {DEFAULT_MAX_PAGES})",
-    )
-    command.add_argument(
-        "--max-file-size-mib",
-        type=_positive_int,
-        default=_DEFAULT_MAX_FILE_SIZE_MIB,
-        help=f"Maximum input PDF size in MiB (default: {_DEFAULT_MAX_FILE_SIZE_MIB})",
-    )
 
 
 def _load_overlays(path: Path) -> list[Overlay]:
@@ -82,13 +66,23 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Include full extracted page text; may contain personal data",
     )
-    _add_limit_arguments(parse_command)
+    parse_command.add_argument("--max-pages", type=_positive_int, default=DEFAULT_MAX_PAGES)
+    parse_command.add_argument(
+        "--max-file-size-mib",
+        type=_positive_int,
+        default=DEFAULT_MAX_FILE_SIZE // (1024 * 1024),
+    )
 
     annotate_command = subparsers.add_parser("annotate", help="Add page labels to a PDF")
     annotate_command.add_argument("--input", required=True, type=Path, help="Input PDF path")
     annotate_command.add_argument("--overlay", required=True, type=Path, help="Overlay JSON path")
     annotate_command.add_argument("--output", required=True, type=Path, help="Output PDF path")
-    _add_limit_arguments(annotate_command)
+    annotate_command.add_argument("--max-pages", type=_positive_int, default=DEFAULT_MAX_PAGES)
+    annotate_command.add_argument(
+        "--max-file-size-mib",
+        type=_positive_int,
+        default=DEFAULT_MAX_FILE_SIZE // (1024 * 1024),
+    )
 
     return parser
 
@@ -102,6 +96,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "parse":
             if args.output.exists() and args.input.samefile(args.output):
                 raise ValueError("Input PDF and output JSON paths must be different")
+
             result = parse_pdf(
                 args.input,
                 include_raw_text=args.include_raw_text,

@@ -13,6 +13,9 @@ Expected squash commit title: `type(scope?): lowercase summary`
 
 ## Verification
 
-- [ ] All required checks documented in `CONTRIBUTING.md` pass locally.
+- [ ] Tests cover the change with synthetic data.
+- [ ] Ruff format and lint pass.
+- [ ] Mypy passes.
+- [ ] Pytest and package build pass.
 - [ ] No real PDFs, personal data, credentials, or active tracking numbers are included.
 - [ ] Public API or schema changes are documented and have the correct release impact.

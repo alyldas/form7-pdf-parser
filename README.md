@@ -32,6 +32,17 @@ Download the wheel from the [latest release](../../releases/latest), then instal
 python -m pip install ./form7_pdf_parser-*.whl
 ```
 
+For development:
+
+```bash
+gh repo clone alyldas/form7-pdf-parser
+cd form7-pdf-parser
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -e ".[dev]"
+```
+
 ## CLI
 
 Parse a PDF into JSON:
@@ -92,11 +103,6 @@ annotate_pdf(
 )
 ```
 
-A page is valid when it has a 14-digit tracking number and at least a recipient name or
-phone number. The address is optional. The recommended package-level API consists of the
-documented models, exceptions, `parse_pdf`, and `annotate_pdf`. Low-level helpers remain
-available from their defining modules; compatibility aliases are retained for the 0.x series.
-
 Invalid Python results expose typed `validation_issues` values such as
 `missing_tracking_number` and `missing_recipient`. They are intentionally omitted from the
 stable JSON contract below; JSON consumers can continue to rely on `is_valid`.
@@ -132,8 +138,14 @@ See [SECURITY.md](SECURITY.md) for vulnerability reporting.
 
 ## Development
 
-See the [development workflow](CONTRIBUTING.md#development-workflow) for environment setup and
-the canonical list of required checks.
+```bash
+ruff format --check .
+ruff check .
+mypy
+pytest
+python -m build
+twine check dist/*
+```
 
 All committed PDF fixtures are generated from clearly fictional data. See
 [tests/fixtures/README.md](tests/fixtures/README.md).
