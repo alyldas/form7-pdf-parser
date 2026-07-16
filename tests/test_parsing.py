@@ -141,6 +141,19 @@ def test_parse_tracking_number_uses_bounded_line_fallback() -> None:
     assert parse_tracking_number(text) == "00000000000000"
 
 
+def test_parse_tracking_number_continues_after_marker_without_digits() -> None:
+    text = "\n".join(
+        [
+            "Оплачивается при вручении: инструкция",
+            *(f"служебная строка {index}" for index in range(10)),
+            "Оплачивается при вручении",
+            "000000 00 00000 0",
+        ]
+    )
+
+    assert parse_tracking_number(text) == "00000000000000"
+
+
 def test_parse_tracking_number_rejects_non_fourteen_digit_candidate() -> None:
     text = "Оплачивается при вручении 00000 0 0000 0"
 
@@ -185,10 +198,13 @@ def test_parse_recipient_returns_phone_when_name_block_is_empty() -> None:
         ("+7 (000) 000–00–00", "0000000000"),
         ("+7 (000) 000−00−00", "0000000000"),
         ("Телефон: 0000000000", "0000000000"),
+        ("Телефон получателя +7 (000) 000-00-00", "0000000000"),
         ("0000000000", None),
         ("60000000000", None),
+        ("71234567890123", None),
         ("123456, 12, 34", None),
         ("Телефон справочной службы +70000000000", None),
+        ("phone support +70000000000", None),
     ],
 )
 def test_parse_recipient_classifies_phone_candidate(
@@ -210,6 +226,85 @@ def test_parse_recipient_preserves_address_merged_with_phone() -> None:
         "000000, г. Примерск",
         "0000000000",
     )
+
+
+@pytest.mark.parametrize("suffix", ["получатель", "/ получатель", ", получатель"])
+def test_parse_recipient_ignores_text_after_merged_phone(suffix: str) -> None:
+    lines = [
+        "100 руб 00 коп",
+        "Тестов Тест Тестович",
+        f"000000, г. Примерск +7 (000) 000-00-00 {suffix}",
+    ]
+
+    assert parse_recipient_name_address_phone(lines) == (
+        "Тестов Тест Тестович",
+        "000000, г. Примерск",
+        "0000000000",
+    )
+
+
+@pytest.mark.parametrize(
+    "service_line",
+    [
+        "Номер заказа +7 111 111 1111",
+        "Код заявки 8 (111) 111-11-11",
+        "Телефон справочной службы +7 (111) 111-11-11",
+    ],
+)
+def test_parse_recipient_skips_phone_shaped_service_line_before_recipient(
+    service_line: str,
+) -> None:
+    lines = [
+        "100 руб 00 коп",
+        service_line,
+        "Тестов Тест Тестович",
+        "000000, г. Примерск",
+        "+7 (000) 000-00-00",
+    ]
+
+    assert parse_recipient_name_address_phone(lines) == (
+        "Тестов Тест Тестович",
+        "000000, г. Примерск",
+        "0000000000",
+    )
+
+
+def test_parse_recipient_preserves_name_that_starts_like_order_label() -> None:
+    lines = [
+        "100 руб 00 коп",
+        "Заказов Заказ Заказович",
+        "000000, г. Примерск",
+        "+7 (000) 000-00-00",
+    ]
+
+    assert parse_recipient_name_address_phone(lines) == (
+        "Заказов Заказ Заказович",
+        "000000, г. Примерск",
+        "0000000000",
+    )
+
+
+def test_parse_page_handles_all_reviewed_extraction_artifacts_together() -> None:
+    text = "\n".join(
+        [
+            "Оплачивается при вручении: инструкция",
+            *(f"служебная строка {index}" for index in range(10)),
+            "Оплачивается при вручении",
+            "000000 00 00000 0",
+            "100 руб 00 коп",
+            "Номер заказа +7 111 111 1111",
+            "Тестов Тест Тестович",
+            "000000, г. Примерск +7 (000) 000-00-00 получатель",
+        ]
+    )
+
+    page = parse_page(text, 1)
+
+    assert page.recipient_name == "Тестов Тест Тестович"
+    assert page.recipient_address == "000000, г. Примерск"
+    assert page.recipient_phone == "0000000000"
+    assert page.tracking_number == "00000000000000"
+    assert page.is_valid is True
 
 
 def test_invalid_page_has_stable_null_fields() -> None:

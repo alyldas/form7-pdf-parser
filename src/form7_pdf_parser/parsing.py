@@ -16,6 +16,25 @@ _PHONE_LABEL_PATTERN = re.compile(
     r"^(?:тел(?:ефон)?|phone)\.?\s*:?\s*",
     flags=re.IGNORECASE,
 )
+_RECIPIENT_PHONE_PREFIX_PATTERN = re.compile(
+    r"^(?:тел(?:ефон)?|phone)\.?\s*:?\s*"
+    r"(?:(?:получател|адресат)\w*|recipient)?\s*:?\s*$",
+    flags=re.IGNORECASE,
+)
+_NON_RECIPIENT_PHONE_PREFIX_PATTERN = re.compile(
+    r"^(?:"
+    r"(?:номер|№|код|идентификатор)\s+"
+    r"(?:заказ|заявк|договор|отправлен)\w*"
+    r"|(?:заказ|заявк)\w*\s+(?:номер|№|код|id)"
+    r"|order\s+(?:number|no\.?|id)"
+    r"|(?:тел(?:ефон)?|phone)\.?\s*:?\s*"
+    r"(?:справочн|служб|поддержк|горяч|контактн|support|help|hotline|customer)\w*"
+    r"|(?:справочн\w*\s+служб\w*|служб\w*\s+поддержк\w*"
+    r"|горяч\w*\s+лини\w*|контактн\w*\s+центр\w*"
+    r"|support|help\s+desk|hotline|customer\s+service)"
+    r")\b",
+    flags=re.IGNORECASE,
+)
 _PHONE_CHARACTERS_PATTERN = re.compile(r"[+\d\s().-]+")
 _FORMATTED_PHONE_PATTERN = re.compile(
     r"^(?:(?:\+?7|8)[\s.-]*)?"
@@ -25,7 +44,7 @@ _FORMATTED_PHONE_PATTERN = re.compile(
     r")$"
 )
 _COMPACT_PHONE_PATTERN = re.compile(r"^(?:\+7|[78])[\s.-]?\d{10}$")
-_PHONE_CANDIDATE_START_PATTERN = re.compile(r"(?=[+(\d])")
+_PHONE_CANDIDATE_START_PATTERN = re.compile(r"(?<!\d)(?=[+(\d])")
 
 
 def normalize_lines(text: str) -> list[str]:
@@ -37,23 +56,29 @@ def _valid_tracking_number(parts: list[str] | tuple[str, ...]) -> str | None:
     return candidate if len(candidate) == 14 and candidate.isdigit() else None
 
 
+def _tracking_marker_matches(lines: list[str]) -> list[tuple[int, str]]:
+    joined_lines = "\n".join(lines)
+    matches: list[tuple[int, str]] = []
+    for match in _TRACKING_MARKER_PATTERN.finditer(joined_lines):
+        if match.group().count("\n") >= _TRACKING_MARKER_MAX_LINES:
+            continue
+
+        marker_end = joined_lines.count("\n", 0, match.end())
+        marker_tail = joined_lines[match.end() :].split("\n", 1)[0]
+        matches.append((marker_end, marker_tail))
+
+    return matches
+
+
 def _find_tracking_marker(
     lines: list[str],
     *,
     reverse: bool = False,
 ) -> tuple[int, str] | None:
-    starts = range(len(lines) - 1, -1, -1) if reverse else range(len(lines))
-    for window_start in starts:
-        window = "\n".join(lines[window_start : window_start + _TRACKING_MARKER_MAX_LINES])
-        match = _TRACKING_MARKER_PATTERN.search(window)
-        if match is None:
-            continue
-
-        marker_end = window_start + window[: match.end()].count("\n")
-        marker_tail = window[match.end() :].split("\n", 1)[0]
-        return marker_end, marker_tail
-
-    return None
+    matches = _tracking_marker_matches(lines)
+    if not matches:
+        return None
+    return matches[-1] if reverse else matches[0]
 
 
 def _find_tracking_parts(
@@ -102,13 +127,11 @@ def _find_tracking_parts(
 
 def parse_tracking_number(text: str, lines: list[str] | None = None) -> str | None:
     normalized_lines = lines if lines is not None else normalize_lines(text)
-    marker_match = _find_tracking_marker(normalized_lines)
-    if marker_match is None:
-        return None
-
-    marker_end, marker_tail = marker_match
-    tracking_match = _find_tracking_parts(normalized_lines, marker_end, marker_tail)
-    return tracking_match[0] if tracking_match is not None else None
+    for marker_end, marker_tail in _tracking_marker_matches(normalized_lines):
+        tracking_match = _find_tracking_parts(normalized_lines, marker_end, marker_tail)
+        if tracking_match is not None:
+            return tracking_match[0]
+    return None
 
 
 def _join_lines(lines: list[str]) -> str | None:
@@ -139,11 +162,19 @@ def _phone_match(line: str) -> tuple[str, str | None] | None:
         return phone_digits, None
 
     for candidate_start in _PHONE_CANDIDATE_START_PATTERN.finditer(normalized_line):
-        candidate = normalized_line[candidate_start.start() :].strip()
+        candidate_match = _PHONE_CHARACTERS_PATTERN.match(
+            normalized_line,
+            candidate_start.start(),
+        )
+        if candidate_match is None:
+            continue
+        candidate = candidate_match.group().strip()
         if phone_digits := _phone_digits(candidate):
             prefix = line[: candidate_start.start()].strip() or None
-            if prefix is not None and _PHONE_LABEL_PATTERN.match(prefix):
+            if prefix is not None and _NON_RECIPIENT_PHONE_PREFIX_PATTERN.match(prefix):
                 continue
+            if prefix is not None and _RECIPIENT_PHONE_PREFIX_PATTERN.match(prefix):
+                prefix = None
             return phone_digits, prefix
 
     return None
@@ -197,6 +228,9 @@ def parse_recipient_name_address_phone(
     )
     if phone_line_prefix is not None:
         recipient_block.append(phone_line_prefix)
+    recipient_block = [
+        line for line in recipient_block if _NON_RECIPIENT_PHONE_PREFIX_PATTERN.match(line) is None
+    ]
 
     if not recipient_block:
         return None, None, phone_digits
