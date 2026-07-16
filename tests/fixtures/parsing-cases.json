@@ -72,6 +72,18 @@
     }
   },
   {
+    "name": "numeric-address-fragment-before-phone",
+    "text": "Оплачивается при вручении\n000000 00 00000 0\n100 руб 00 коп\nТестов Тест Тестович\nг. Примерск, ул. Макетная\n123456, 12, 34\n+7 (000) 000-00-00\n",
+    "expected": {
+      "recipient_name": "Тестов Тест Тестович",
+      "recipient_address": "г. Примерск, ул. Макетная 123456, 12, 34",
+      "recipient_phone": "0000000000",
+      "tracking_number": "00000000000000",
+      "is_valid": true,
+      "validation_issues": []
+    }
+  },
+  {
     "name": "labelled-recipient-phone-before-footer-phone",
     "text": "Оплачивается при вручении\n000000 00 00000 0\n100 руб 00 коп\nТестов Тест Тестович\n000000, г. Примерск\nТелефон: +7 (000) 000-00-00\nТелефон справочной службы\n+7 (111) 111-11-11\n",
     "expected": {

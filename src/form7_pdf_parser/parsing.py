@@ -12,7 +12,17 @@ _TRACKING_PATTERN = re.compile(
 )
 _TRACKING_PART_LENGTHS = ((5, 7), (1, 3), (4, 6), (1, 1))
 _AMOUNT_PATTERN = re.compile(r"\b(?:руб|коп)\b", flags=re.IGNORECASE)
-_PHONE_LABEL_PATTERN = re.compile(r"\b(?:тел(?:ефон)?|phone)\b", flags=re.IGNORECASE)
+_PHONE_LABEL_PATTERN = re.compile(
+    r"^(?:тел(?:ефон)?|phone)\.?\s*:?\s*",
+    flags=re.IGNORECASE,
+)
+_PHONE_CHARACTERS_PATTERN = re.compile(r"[+\d\s().-]+")
+_FORMATTED_PHONE_PATTERN = re.compile(
+    r"^(?:(?:\+?7|8)[\s-]*)?"
+    r"(?:\(\d{3}\)[\s-]*|\d{3}[\s-]+)"
+    r"\d{3}[\s-]+\d{2}[\s-]+\d{2}$"
+)
+_COMPACT_INTERNATIONAL_PHONE_PATTERN = re.compile(r"^\+7\d{10}$")
 
 
 def normalize_lines(text: str) -> list[str]:
@@ -83,10 +93,20 @@ def _join_lines(lines: list[str]) -> str | None:
 
 
 def _phone_digits(line: str) -> str | None:
-    if any(character.isalpha() for character in line) and not _PHONE_LABEL_PATTERN.search(line):
+    label_match = _PHONE_LABEL_PATTERN.match(line)
+    value = line[label_match.end() :] if label_match is not None else line
+    if not _PHONE_CHARACTERS_PATTERN.fullmatch(value):
         return None
-    digits = re.sub(r"\D+", "", line)
-    return digits[-10:] if len(digits) in (10, 11) else None
+
+    digits = re.sub(r"\D+", "", value)
+    if len(digits) not in (10, 11):
+        return None
+    if label_match is None and not (
+        _FORMATTED_PHONE_PATTERN.fullmatch(value)
+        or _COMPACT_INTERNATIONAL_PHONE_PATTERN.fullmatch(value)
+    ):
+        return None
+    return digits[-10:]
 
 
 def _find_recipient_phone(lines: list[str]) -> tuple[int, str, int | None] | None:

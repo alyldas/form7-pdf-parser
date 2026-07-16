@@ -95,6 +95,10 @@ def test_parse_recipient_returns_phone_when_name_block_is_empty() -> None:
     )
 
 
+def test_parse_recipient_rejects_unformatted_numeric_candidate() -> None:
+    assert parse_recipient_name_address_phone(["1234567890"]) == (None, None, None)
+
+
 def test_invalid_page_has_stable_null_fields() -> None:
     page = parse_page("Synthetic page without shipping data", 2)
 
