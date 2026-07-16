@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from itertools import product
 
 from .models import PageValidationIssue, ParsedPage
 
@@ -8,7 +9,10 @@ _TRACKING_MARKER_PATTERN = re.compile(
     r"\bОплачивается\s+при\s+вручении(?![^\W\d])",
     flags=re.IGNORECASE,
 )
-_TRACKING_PART_LENGTHS = ((5, 7), (1, 3), (4, 6), (1, 1))
+_TRACKING_LAYOUTS = tuple(
+    layout for layout in product(range(5, 8), range(1, 4), range(4, 7), (1,)) if sum(layout) == 14
+)
+_TRACKING_LABEL_PATTERN = re.compile(r"^(?:№|N[oº]?\.?)\s*:?\s*", flags=re.IGNORECASE)
 _AMOUNT_PATTERN = re.compile(r"\b(?:руб|коп)\b", flags=re.IGNORECASE)
 _PHONE_DASH_PATTERN = re.compile(r"[‐‑‒–—―−﹘﹣－]")
 _PHONE_LABEL_PATTERN = re.compile(
@@ -27,10 +31,8 @@ _NON_RECIPIENT_PHONE_PREFIX_PATTERN = re.compile(
 _PHONE_CHARACTERS_PATTERN = re.compile(r"[+\d\s().-]+")
 _FORMATTED_PHONE_PATTERN = re.compile(
     r"^(?:(?:\+?7|8)[\s.-]*)?"
-    r"(?:"
-    r"\(\d{3}\)[\s.-]*\d{3}[\s.-]*(?:\d{4}|\d{2}[\s.-]*\d{2})"
-    r"|\d{3}[\s.-]+\d{3}[\s.-]+(?:\d{4}|\d{2}[\s.-]+\d{2})"
-    r")$"
+    r"(?:\(\d{3}\)[\s.-]*|\d{3}[\s.-]+)"
+    r"(?:\d{7}|\d{3}[\s.-]+(?:\d{4}|\d{2}[\s.-]+\d{2}))$"
 )
 _COMPACT_PHONE_PATTERN = re.compile(r"^(?:\+7|[78])[\s.-]?\d{10}$")
 _PHONE_CANDIDATE_START_PATTERN = re.compile(r"(?<!\d)(?=[+(\d])")
@@ -61,43 +63,61 @@ def _find_tracking_parts(
     marker_end: int,
     marker_tail: str,
 ) -> tuple[str, int] | None:
-    parts: list[tuple[int, str]] = []
+    tokens: list[tuple[str, int, bool]] = []
 
     for line_index in range(marker_end, min(marker_end + 10, len(lines))):
         candidate = marker_tail if line_index == marker_end else lines[line_index]
-        candidate = candidate.lstrip(" :—-")
+        candidate = _TRACKING_LABEL_PATTERN.sub("", candidate.lstrip(" :—-"), count=1)
         numeric_prefix = re.match(r"[0-9\s]+", candidate)
         if numeric_prefix is None:
             if _AMOUNT_PATTERN.search(candidate):
                 break
             continue
 
-        for digits in numeric_prefix.group().split():
-            if len(digits) == 14:
-                return digits, line_index + 1
-            if not re.fullmatch(r"\d{1,7}", digits):
-                continue
-
-            parts.append((line_index, digits))
-            candidate_parts = parts[-4:]
-            if len(candidate_parts) < 4 or not all(
-                minimum <= len(part) <= maximum
-                for (_, part), (minimum, maximum) in zip(
-                    candidate_parts,
-                    _TRACKING_PART_LENGTHS,
-                    strict=True,
+        remainder = candidate[numeric_prefix.end() :]
+        line_tokens = numeric_prefix.group().split()
+        for token_index, digits in enumerate(line_tokens):
+            tokens.append(
+                (
+                    digits,
+                    line_index,
+                    token_index == len(line_tokens) - 1 and bool(_AMOUNT_PATTERN.search(remainder)),
                 )
-            ):
-                continue
+            )
 
-            tracking_number = _valid_tracking_number([part for _, part in candidate_parts])
-            if tracking_number is not None:
-                return tracking_number, candidate_parts[-1][0] + 1
-
-        if candidate[numeric_prefix.end() :].strip():
+        if remainder.strip():
             break
 
-    return None
+    best_match: tuple[str, int] | None = None
+    for start_index in range(len(tokens)):
+        for layout in _TRACKING_LAYOUTS:
+            part_index = 0
+            token_index = start_index
+            while part_index < len(layout) and token_index < len(tokens):
+                digits, line_index, allows_trailing_amount = tokens[token_index]
+                consumed = 0
+                while part_index < len(layout) and consumed < len(digits):
+                    consumed += layout[part_index]
+                    part_index += 1
+
+                if consumed > len(digits):
+                    break
+                if consumed < len(digits) and not (
+                    part_index == len(layout) and allows_trailing_amount
+                ):
+                    break
+
+                token_index += 1
+            else:
+                if part_index == len(layout):
+                    tracking_number = _valid_tracking_number(
+                        ("".join(digits for digits, _, _ in tokens[start_index:token_index])[:14],)
+                    )
+                    if tracking_number is not None:
+                        best_match = tracking_number, line_index + 1
+                        break
+
+    return best_match
 
 
 def parse_tracking_number(text: str, lines: list[str] | None = None) -> str | None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from itertools import product
 from pathlib import Path
 
 import pytest
@@ -75,6 +76,26 @@ def test_parse_page_includes_raw_text_only_when_requested() -> None:
             id="mixed-inline-and-wrapped",
         ),
         pytest.param(
+            "Оплачивается при вручении 00000000 00000 0",
+            id="merged-first-and-second-parts",
+        ),
+        pytest.param(
+            "Оплачивается при вручении 000000 0000000 0",
+            id="merged-second-and-third-parts",
+        ),
+        pytest.param(
+            "Оплачивается при вручении 000000 00 000000",
+            id="merged-third-and-final-parts",
+        ),
+        pytest.param(
+            "Оплачивается при вручении 000000 00 00000 0100 руб 00 коп",
+            id="final-part-merged-with-amount",
+        ),
+        pytest.param(
+            "Оплачивается при вручении\n№ 000000\n00\n00000\n0",
+            id="number-labelled-first-part",
+        ),
+        pytest.param(
             "Оплачивается при\nвручении\n000000 00 00000 0",
             id="two-line-marker",
         ),
@@ -115,6 +136,39 @@ def test_parse_tracking_number_accepts_supported_layouts(text: str) -> None:
     assert parse_tracking_number(text) == "00000000000000"
 
 
+def test_parse_tracking_number_accepts_merged_and_labelled_layouts() -> None:
+    layouts = (
+        layout
+        for layout in product(range(5, 8), range(1, 4), range(4, 7), (1,))
+        if sum(layout) == 14
+    )
+    for layout in layouts:
+        parts = [str(index) * length for index, length in enumerate(layout, start=1)]
+        expected = "".join(parts)
+        for boundary in range(3):
+            tokens = [
+                *parts[:boundary],
+                "".join(parts[boundary : boundary + 2]),
+                *parts[boundary + 2 :],
+            ]
+
+            assert (
+                parse_tracking_number(f"Оплачивается при вручении {' '.join(tokens)}") == expected
+            )
+
+        assert (
+            parse_tracking_number(
+                "\n".join(["Оплачивается при вручении", f"№ {parts[0]}", *parts[1:]])
+            )
+            == expected
+        )
+        amount_tokens = [*parts[:-1], f"{parts[-1]}100"]
+        assert (
+            parse_tracking_number(f"Оплачивается при вручении {' '.join(amount_tokens)} руб 00 коп")
+            == expected
+        )
+
+
 def test_parse_tracking_number_rejects_non_fourteen_digit_candidate() -> None:
     text = "Оплачивается при вручении 00000 0 0000 0"
 
@@ -150,6 +204,9 @@ def test_parse_recipient_returns_phone_when_name_block_is_empty() -> None:
         ("+7(000)0000000", "0000000000"),
         ("+7 (000) 000-0000", "0000000000"),
         ("+7 000 000 0000", "0000000000"),
+        ("+7 900 1234567", "9001234567"),
+        ("8 900 1234567", "9001234567"),
+        ("+7 (900) 1234567", "9001234567"),
         ("000.000.00.00", "0000000000"),
         ("000 000 0000", "0000000000"),
         ("7 000 000 0000", "0000000000"),
