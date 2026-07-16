@@ -14,6 +14,7 @@ _TRACKING_LAYOUTS = tuple(
     layout for layout in product(range(5, 8), range(1, 4), range(4, 7), (1,)) if sum(layout) == 14
 )
 _TRACKING_LABEL_PATTERN = re.compile(r"^(?:№|N[oº]?\.?)\s*:?\s*", flags=re.IGNORECASE)
+_TRACKING_DATE_PREAMBLE_PATTERN = re.compile(r"(?:0[1-9]|[12]\d|3[01])(?:0[1-9]|1[0-2])\d{2}")
 _AMOUNT_PATTERN = re.compile(r"\b(?:руб|коп)\b", flags=re.IGNORECASE)
 _PHONE_DASH_PATTERN = re.compile(r"[‐‑‒–—―−﹘﹣－]")
 _PHONE_LABEL_PATTERN = re.compile(
@@ -43,7 +44,6 @@ class _TrackingCandidate(NamedTuple):
     start_index: int
     end_index: int
     inferred_boundaries: int
-    is_single_line: bool
     tracking_number: str
     end_line: int
 
@@ -105,7 +105,6 @@ def _tracking_tokens_match(tokens: list[tuple[str, int, bool]]) -> tuple[str, in
                         start_index=start_index,
                         end_index=token_index,
                         inferred_boundaries=len(layout) - (token_index - start_index),
-                        is_single_line=(tokens[start_index][1] == tokens[token_index - 1][1]),
                         tracking_number=tracking_number,
                         end_line=tokens[token_index - 1][1] + 1,
                     )
@@ -123,17 +122,32 @@ def _tracking_tokens_match(tokens: list[tuple[str, int, bool]]) -> tuple[str, in
         overlapping_candidates.append(candidate)
         overlap_end = max(overlap_end, candidate.end_index)
 
-    earliest_start = overlapping_candidates[0].start_index
-    earliest_single_line_candidates = [
-        candidate
-        for candidate in overlapping_candidates
-        if candidate.start_index == earliest_start and candidate.is_single_line
+    selected_start = overlapping_candidates[0].start_index
+    selected_candidates = [
+        candidate for candidate in overlapping_candidates if candidate.start_index == selected_start
     ]
+    inferred_boundaries = min(candidate.inferred_boundaries for candidate in selected_candidates)
+    if inferred_boundaries > 0 and _TRACKING_DATE_PREAMBLE_PATTERN.fullmatch(
+        tokens[selected_start][0]
+    ):
+        later_candidates = [
+            candidate
+            for candidate in overlapping_candidates
+            if candidate.start_index > selected_start
+            and candidate.inferred_boundaries < inferred_boundaries
+        ]
+        if later_candidates:
+            selected_start = min(candidate.start_index for candidate in later_candidates)
+            selected_candidates = [
+                candidate
+                for candidate in later_candidates
+                if candidate.start_index == selected_start
+            ]
+
     best_candidate = min(
-        earliest_single_line_candidates or overlapping_candidates,
+        selected_candidates,
         key=lambda candidate: (
             candidate.inferred_boundaries,
-            candidate.start_index,
             candidate.end_index,
         ),
     )

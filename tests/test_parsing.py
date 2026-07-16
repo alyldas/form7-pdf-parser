@@ -214,6 +214,18 @@ def test_parse_tracking_number_keeps_earliest_merged_candidate() -> None:
     assert parse_tracking_number(text) == "12345678901234"
 
 
+def test_parse_tracking_number_keeps_earliest_wrapped_merged_candidate() -> None:
+    text = """Оплачивается при вручении
+12345678
+901234
+99
+12345
+0
+"""
+
+    assert parse_tracking_number(text) == "12345678901234"
+
+
 def test_parse_tracking_number_accepts_amount_word_on_next_line() -> None:
     text = """Оплачивается при вручении 123456 78 90123 4100
 руб 00 коп
