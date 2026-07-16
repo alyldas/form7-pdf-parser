@@ -15,7 +15,8 @@ data and a newly generated minimal PDF.
 3. Install development dependencies with `python -m pip install -e ".[dev]"`.
 4. Add or update synthetic tests.
 5. Run all checks listed below.
-6. Open a pull request describing behavior, compatibility, and privacy impact.
+6. Give the pull request a Conventional Commit title.
+7. Open the pull request with behavior, compatibility, release, and privacy impact.
 
 ```bash
 ruff format --check .
@@ -26,8 +27,15 @@ python -m build
 twine check dist/*
 ```
 
-Changes to the public API or JSON schema must include a changelog entry. Breaking changes are
-reserved for a new major version after `1.0.0`.
+## Commits and releases
+
+The repository uses squash merges. Pull request titles become the commits on `main`, so they
+must follow `type(scope?): lowercase summary`. Use `fix:` for patches, `feat:` for minor
+releases, and `!` or a `BREAKING CHANGE:` footer for major releases. See the
+[release process](docs/release-process.md) for examples and recovery guidance.
+
+Describe public API and JSON schema changes in the pull request. Release Please updates the
+version and changelog from the Conventional Commit history. Breaking changes are reserved for
+a new major version after `1.0.0`.
 
 By participating, you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
-
