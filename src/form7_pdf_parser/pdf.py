@@ -22,9 +22,12 @@ _STREAM_SPOOL_MEMORY_LIMIT = 8 * 1024 * 1024
 PdfSource: TypeAlias = str | os.PathLike[str] | BinaryIO
 
 
-def _source_size(source: PdfSource) -> int:
+def _source_size(source: PdfSource) -> int | None:
     if isinstance(source, (str, os.PathLike)):
         return Path(source).stat().st_size
+
+    if not source.seekable():
+        return None
 
     position = source.tell()
     source.seek(0, os.SEEK_END)
@@ -38,7 +41,7 @@ def enforce_source_size(source: PdfSource, max_file_size: int) -> None:
         raise ValueError("max_file_size must be positive")
 
     size = _source_size(source)
-    if size > max_file_size:
+    if size is not None and size > max_file_size:
         raise PdfLimitError(f"PDF exceeds the {max_file_size}-byte size limit")
 
 

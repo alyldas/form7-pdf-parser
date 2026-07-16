@@ -169,6 +169,40 @@ def test_parse_tracking_number_accepts_merged_and_labelled_layouts() -> None:
         )
 
 
+def test_parse_tracking_number_skips_textual_numeric_service_tail() -> None:
+    text = """Оплачивается при вручении 160726 дата
+123456
+78
+90123
+4
+"""
+
+    assert parse_tracking_number(text) == "12345678901234"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Оплачивается при вручении 123456 78 90123 4 принято",
+        "Оплачивается при вручении\n123456\n78\n90123\n4 принято",
+    ],
+)
+def test_parse_tracking_number_accepts_valid_prefix_before_text(text: str) -> None:
+    assert parse_tracking_number(text) == "12345678901234"
+
+
+def test_parse_tracking_number_returns_first_valid_candidate() -> None:
+    text = """Оплачивается при вручении
+123456 78 90123 4
+160726
+99
+12345
+0
+"""
+
+    assert parse_tracking_number(text) == "12345678901234"
+
+
 def test_parse_tracking_number_rejects_non_fourteen_digit_candidate() -> None:
     text = "Оплачивается при вручении 00000 0 0000 0"
 
@@ -243,6 +277,15 @@ def test_parse_recipient_ignores_text_after_merged_phone(suffix: str) -> None:
     assert parse_recipient_name_address_phone(lines) == (
         "Тестов Тест Тестович",
         "000000, г. Примерск",
+        "0000000000",
+    )
+
+
+@pytest.mark.parametrize("label", ["Телефон:", "Телефон получателя:", "phone recipient:"])
+def test_parse_recipient_strips_phone_label_before_trailing_text(label: str) -> None:
+    assert parse_recipient_name_address_phone([f"{label} +7 (000) 000-00-00 получатель"]) == (
+        None,
+        None,
         "0000000000",
     )
 

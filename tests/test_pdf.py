@@ -7,6 +7,7 @@ import pytest
 from pypdf import PdfWriter
 
 from form7_pdf_parser import PdfLimitError, PdfReadError, parse_pdf
+from form7_pdf_parser.pdf import enforce_source_size
 
 FIXTURE = Path(__file__).parent / "fixtures" / "synthetic-form7.pdf"
 
@@ -62,6 +63,10 @@ def test_parse_pdf_enforces_size_limit_for_non_seekable_stream() -> None:
 
     with pytest.raises(PdfLimitError, match="size limit"):
         parse_pdf(NonSeekableStream(payload), max_file_size=len(payload) - 1)
+
+
+def test_enforce_source_size_allows_unknown_non_seekable_size() -> None:
+    enforce_source_size(NonSeekableStream(b"larger than the limit"), max_file_size=1)
 
 
 def test_parse_pdf_enforces_page_limit() -> None:

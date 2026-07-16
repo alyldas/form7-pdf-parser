@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from itertools import product
+from typing import NamedTuple
 
 from .models import PageValidationIssue, ParsedPage
 
@@ -38,6 +39,14 @@ _COMPACT_PHONE_PATTERN = re.compile(r"^(?:\+7|[78])[\s.-]?\d{10}$")
 _PHONE_CANDIDATE_START_PATTERN = re.compile(r"(?<!\d)(?=[+(\d])")
 
 
+class _TrackingCandidate(NamedTuple):
+    start_index: int
+    end_index: int
+    inferred_boundaries: int
+    tracking_number: str
+    end_line: int
+
+
 def normalize_lines(text: str) -> list[str]:
     return [line for raw in text.splitlines() if (line := re.sub(r"\s+", " ", raw).strip())]
 
@@ -58,6 +67,71 @@ def _tracking_marker_matches(lines: list[str]) -> list[tuple[int, str]]:
     return matches
 
 
+def _tracking_tokens_match(tokens: list[tuple[str, int, bool]]) -> tuple[str, int] | None:
+    candidates: list[_TrackingCandidate] = []
+    for start_index in range(len(tokens)):
+        for layout in _TRACKING_LAYOUTS:
+            part_index = 0
+            token_index = start_index
+            layout_matches = True
+            while part_index < len(layout) and token_index < len(tokens):
+                digits, _, allows_trailing_amount = tokens[token_index]
+                consumed = 0
+                while part_index < len(layout) and consumed < len(digits):
+                    consumed += layout[part_index]
+                    part_index += 1
+
+                if consumed > len(digits):
+                    layout_matches = False
+                    break
+                if consumed < len(digits) and not (
+                    part_index == len(layout) and allows_trailing_amount
+                ):
+                    layout_matches = False
+                    break
+
+                token_index += 1
+
+            if not layout_matches or part_index != len(layout):
+                continue
+
+            tracking_number = _valid_tracking_number(
+                ("".join(digits for digits, _, _ in tokens[start_index:token_index])[:14],)
+            )
+            if tracking_number is not None:
+                candidates.append(
+                    _TrackingCandidate(
+                        start_index=start_index,
+                        end_index=token_index,
+                        inferred_boundaries=len(layout) - (token_index - start_index),
+                        tracking_number=tracking_number,
+                        end_line=tokens[token_index - 1][1] + 1,
+                    )
+                )
+
+    if not candidates:
+        return None
+
+    candidates.sort(key=lambda candidate: (candidate.start_index, candidate.end_index))
+    overlapping_candidates = [candidates[0]]
+    overlap_end = candidates[0].end_index
+    for candidate in candidates[1:]:
+        if candidate.start_index >= overlap_end:
+            break
+        overlapping_candidates.append(candidate)
+        overlap_end = max(overlap_end, candidate.end_index)
+
+    best_candidate = min(
+        overlapping_candidates,
+        key=lambda candidate: (
+            candidate.inferred_boundaries,
+            candidate.start_index,
+            candidate.end_index,
+        ),
+    )
+    return best_candidate.tracking_number, best_candidate.end_line
+
+
 def _find_tracking_parts(
     lines: list[str],
     marker_end: int,
@@ -75,49 +149,26 @@ def _find_tracking_parts(
             continue
 
         remainder = candidate[numeric_prefix.end() :]
+        has_trailing_amount = bool(_AMOUNT_PATTERN.search(remainder))
+        line_token_start = len(tokens)
         line_tokens = numeric_prefix.group().split()
         for token_index, digits in enumerate(line_tokens):
             tokens.append(
                 (
                     digits,
                     line_index,
-                    token_index == len(line_tokens) - 1 and bool(_AMOUNT_PATTERN.search(remainder)),
+                    token_index == len(line_tokens) - 1 and has_trailing_amount,
                 )
             )
 
         if remainder.strip():
-            break
+            if has_trailing_amount:
+                break
+            if tracking_match := _tracking_tokens_match(tokens):
+                return tracking_match
+            del tokens[line_token_start:]
 
-    best_match: tuple[str, int] | None = None
-    for start_index in range(len(tokens)):
-        for layout in _TRACKING_LAYOUTS:
-            part_index = 0
-            token_index = start_index
-            while part_index < len(layout) and token_index < len(tokens):
-                digits, line_index, allows_trailing_amount = tokens[token_index]
-                consumed = 0
-                while part_index < len(layout) and consumed < len(digits):
-                    consumed += layout[part_index]
-                    part_index += 1
-
-                if consumed > len(digits):
-                    break
-                if consumed < len(digits) and not (
-                    part_index == len(layout) and allows_trailing_amount
-                ):
-                    break
-
-                token_index += 1
-            else:
-                if part_index == len(layout):
-                    tracking_number = _valid_tracking_number(
-                        ("".join(digits for digits, _, _ in tokens[start_index:token_index])[:14],)
-                    )
-                    if tracking_number is not None:
-                        best_match = tracking_number, line_index + 1
-                        break
-
-    return best_match
+    return _tracking_tokens_match(tokens)
 
 
 def parse_tracking_number(text: str, lines: list[str] | None = None) -> str | None:
@@ -168,6 +219,8 @@ def _phone_match(line: str) -> tuple[str, str | None] | None:
             prefix = line[: candidate_start.start()].strip() or None
             if prefix is not None and _NON_RECIPIENT_PHONE_PREFIX_PATTERN.match(prefix):
                 continue
+            if prefix is not None:
+                prefix = _PHONE_LABEL_PATTERN.sub("", prefix, count=1).strip() or None
             return phone_digits, prefix
 
     return None
