@@ -43,6 +43,7 @@ class _TrackingCandidate(NamedTuple):
     start_index: int
     end_index: int
     inferred_boundaries: int
+    is_single_line: bool
     tracking_number: str
     end_line: int
 
@@ -104,6 +105,7 @@ def _tracking_tokens_match(tokens: list[tuple[str, int, bool]]) -> tuple[str, in
                         start_index=start_index,
                         end_index=token_index,
                         inferred_boundaries=len(layout) - (token_index - start_index),
+                        is_single_line=(tokens[start_index][1] == tokens[token_index - 1][1]),
                         tracking_number=tracking_number,
                         end_line=tokens[token_index - 1][1] + 1,
                     )
@@ -121,8 +123,14 @@ def _tracking_tokens_match(tokens: list[tuple[str, int, bool]]) -> tuple[str, in
         overlapping_candidates.append(candidate)
         overlap_end = max(overlap_end, candidate.end_index)
 
+    earliest_start = overlapping_candidates[0].start_index
+    earliest_single_line_candidates = [
+        candidate
+        for candidate in overlapping_candidates
+        if candidate.start_index == earliest_start and candidate.is_single_line
+    ]
     best_candidate = min(
-        overlapping_candidates,
+        earliest_single_line_candidates or overlapping_candidates,
         key=lambda candidate: (
             candidate.inferred_boundaries,
             candidate.start_index,
@@ -145,6 +153,9 @@ def _find_tracking_parts(
         numeric_prefix = re.match(r"[0-9\s]+", candidate)
         if numeric_prefix is None:
             if _AMOUNT_PATTERN.search(candidate):
+                if tokens and tokens[-1][1] == line_index - 1:
+                    digits, token_line, _ = tokens[-1]
+                    tokens[-1] = digits, token_line, True
                 break
             continue
 
@@ -226,6 +237,27 @@ def _phone_match(line: str) -> tuple[str, str | None] | None:
     return None
 
 
+def _is_split_non_recipient_phone(lines: list[str], phone_index: int) -> bool:
+    return phone_index > 0 and bool(
+        _NON_RECIPIENT_PHONE_PREFIX_PATTERN.match(lines[phone_index - 1])
+    )
+
+
+def _without_non_recipient_phone_lines(lines: list[str]) -> list[str]:
+    recipient_lines: list[str] = []
+    skip_split_phone = False
+    for line in lines:
+        if _NON_RECIPIENT_PHONE_PREFIX_PATTERN.match(line):
+            skip_split_phone = True
+            continue
+        if skip_split_phone and _phone_match(line) is not None:
+            skip_split_phone = False
+            continue
+        skip_split_phone = False
+        recipient_lines.append(line)
+    return recipient_lines
+
+
 def _find_recipient_phone(
     lines: list[str],
 ) -> tuple[int, str, int | None, str | None] | None:
@@ -234,11 +266,15 @@ def _find_recipient_phone(
             continue
 
         for phone_index in range(amount_index + 1, min(amount_index + 9, len(lines))):
+            if _is_split_non_recipient_phone(lines, phone_index):
+                continue
             if phone_match := _phone_match(lines[phone_index]):
                 phone_digits, line_prefix = phone_match
                 return phone_index, phone_digits, amount_index, line_prefix
 
     for phone_index in range(len(lines) - 1, -1, -1):
+        if _is_split_non_recipient_phone(lines, phone_index):
+            continue
         if phone_match := _phone_match(lines[phone_index]):
             phone_digits, line_prefix = phone_match
             return phone_index, phone_digits, None, line_prefix
@@ -274,9 +310,7 @@ def parse_recipient_name_address_phone(
     )
     if phone_line_prefix is not None:
         recipient_block.append(phone_line_prefix)
-    recipient_block = [
-        line for line in recipient_block if _NON_RECIPIENT_PHONE_PREFIX_PATTERN.match(line) is None
-    ]
+    recipient_block = _without_non_recipient_phone_lines(recipient_block)
 
     if not recipient_block:
         return None, None, phone_digits
