@@ -68,6 +68,10 @@ def test_parse_page_includes_raw_text_only_when_requested() -> None:
             id="compact-touching-marker",
         ),
         pytest.param(
+            "ИтогоОплачивается при вручении 000000 00 00000 0",
+            id="marker-touching-prefix",
+        ),
+        pytest.param(
             "Оплачивается при вручении\n000000 00\n00000 0",
             id="wrapped-groups",
         ),
@@ -244,6 +248,17 @@ def test_parse_tracking_number_accepts_amount_word_on_next_line() -> None:
     assert parse_tracking_number(text) == "12345678901234"
 
 
+def test_parse_tracking_number_accepts_final_digit_before_service_suffix() -> None:
+    text = """Оплачивается при вручении
+123456 78 90123 499
+12345
+0
+100 руб 00 коп
+"""
+
+    assert parse_tracking_number(text) == "12345678901234"
+
+
 def test_parse_tracking_number_rejects_non_fourteen_digit_candidate() -> None:
     text = "Оплачивается при вручении 00000 0 0000 0"
 
@@ -298,8 +313,10 @@ def test_parse_recipient_returns_phone_when_name_block_is_empty() -> None:
         ("123456, 12, 34", None),
         ("Телефон справочной службы +70000000000", None),
         ("Телефон службы поддержки +70000000000", None),
+        ("Служба поддержки +70000000000", None),
         ("phone support +70000000000", None),
         ("phone customer support +70000000000", None),
+        ("support service +70000000000", None),
     ],
 )
 def test_parse_recipient_classifies_phone_candidate(
@@ -384,6 +401,8 @@ def test_parse_recipient_preserves_phone_label_prefix_words(prefix: str) -> None
         "Номер заказа +7 111 111 1111",
         "Код заявки 8 (111) 111-11-11",
         "Телефон справочной службы +7 (111) 111-11-11",
+        "Служба поддержки +7 (111) 111-11-11",
+        "support service +7 (111) 111-11-11",
     ],
 )
 def test_parse_recipient_skips_phone_shaped_service_line_before_recipient(
@@ -409,9 +428,11 @@ def test_parse_recipient_skips_phone_shaped_service_line_before_recipient(
     [
         "Телефон справочной службы",
         "Телефон службы поддержки",
+        "Служба поддержки",
         "Номер заказа",
         "phone customer support",
         "phone support",
+        "support service",
     ],
 )
 def test_parse_recipient_skips_split_service_phone_before_recipient(

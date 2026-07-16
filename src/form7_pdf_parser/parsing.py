@@ -7,7 +7,7 @@ from typing import NamedTuple
 from .models import PageValidationIssue, ParsedPage
 
 _TRACKING_MARKER_PATTERN = re.compile(
-    r"\bОплачивается\s+при\s+вручении(?![^\W\d])",
+    r"Оплачивается\s+при\s+вручении(?![^\W\d])",
     flags=re.IGNORECASE,
 )
 _TRACKING_LAYOUTS = tuple(
@@ -28,6 +28,8 @@ _NON_RECIPIENT_PHONE_PREFIX_PATTERN = re.compile(
     r"|(?:контактн\w*\s+)?(?:тел(?:ефон)?|phone)\b\.?\s*:?\s*"
     r"(?:(?:служб|техническ|клиентск|customer|technical)\w*\s+){0,2}"
     r"(?:справочн|поддержк|support)\w*"
+    r"|служб\w*\s+(?:(?:клиентск|техническ)\w*\s+)?(?:справочн|поддержк)\w*"
+    r"|(?:customer\s+)?support(?:\s+service)?"
     r")\b",
     flags=re.IGNORECASE,
 )
@@ -77,7 +79,7 @@ def _tracking_tokens_match(tokens: list[tuple[str, int, bool]]) -> tuple[str, in
             token_index = start_index
             layout_matches = True
             while part_index < len(layout) and token_index < len(tokens):
-                digits, _, allows_trailing_amount = tokens[token_index]
+                digits, _, allows_trailing_suffix = tokens[token_index]
                 consumed = 0
                 while part_index < len(layout) and consumed < len(digits):
                     consumed += layout[part_index]
@@ -87,7 +89,7 @@ def _tracking_tokens_match(tokens: list[tuple[str, int, bool]]) -> tuple[str, in
                     layout_matches = False
                     break
                 if consumed < len(digits) and not (
-                    part_index == len(layout) and allows_trailing_amount
+                    part_index == len(layout) and allows_trailing_suffix
                 ):
                     layout_matches = False
                     break
@@ -168,9 +170,6 @@ def _find_tracking_parts(
         numeric_prefix = re.match(r"[0-9\s]+", candidate)
         if numeric_prefix is None:
             if _AMOUNT_PATTERN.search(candidate):
-                if tokens and tokens[-1][1] == line_index - 1:
-                    digits, token_line, _ = tokens[-1]
-                    tokens[-1] = digits, token_line, True
                 break
             continue
 
@@ -182,7 +181,7 @@ def _find_tracking_parts(
                 (
                     digits,
                     line_index,
-                    token_index == len(line_tokens) - 1 and has_trailing_amount,
+                    token_index == len(line_tokens) - 1,
                 )
             )
 
