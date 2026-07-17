@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import stat
 from pathlib import Path
 
@@ -20,7 +21,8 @@ def test_parse_command_writes_privacy_safe_json(tmp_path: Path) -> None:
     assert exit_code == 0
     assert payload["page_count"] == 2
     assert payload["pages"][0]["raw_text"] is None
-    assert stat.S_IMODE(output.stat().st_mode) == 0o600
+    if os.name == "posix":
+        assert stat.S_IMODE(output.stat().st_mode) == 0o600
 
 
 def test_parse_command_can_include_raw_text(tmp_path: Path) -> None:
@@ -157,24 +159,67 @@ def test_parse_command_reports_processing_error(
     assert "Unable to read" in capsys.readouterr().err
 
 
-def test_cli_uses_argparse_exit_code_for_invalid_arguments() -> None:
+@pytest.mark.parametrize(
+    ("command", "limit_flag"),
+    [
+        (["parse", "--input", "input.pdf", "--output", "output.json"], "--max-pages"),
+        (
+            [
+                "annotate",
+                "--input",
+                "input.pdf",
+                "--overlay",
+                "overlay.json",
+                "--output",
+                "output.pdf",
+            ],
+            "--max-pages",
+        ),
+        (
+            ["parse", "--input", "input.pdf", "--output", "output.json"],
+            "--max-file-size-mib",
+        ),
+        (
+            [
+                "annotate",
+                "--input",
+                "input.pdf",
+                "--overlay",
+                "overlay.json",
+                "--output",
+                "output.pdf",
+            ],
+            "--max-file-size-mib",
+        ),
+    ],
+)
+def test_cli_uses_argparse_exit_code_for_invalid_limits(
+    command: list[str],
+    limit_flag: str,
+) -> None:
     with pytest.raises(SystemExit) as error:
-        build_parser().parse_args(["parse", "--input", "input.pdf", "--max-pages", "0"])
+        build_parser().parse_args([*command, limit_flag, "0"])
 
     assert error.value.code == 2
 
 
-def test_cli_accepts_positive_limits() -> None:
-    args = build_parser().parse_args(
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["parse", "--input", "input.pdf", "--output", "output.json"],
         [
-            "parse",
+            "annotate",
             "--input",
             "input.pdf",
+            "--overlay",
+            "overlay.json",
             "--output",
-            "output.json",
-            "--max-pages",
-            "1",
-        ]
-    )
+            "output.pdf",
+        ],
+    ],
+)
+def test_cli_accepts_positive_limits(command: list[str]) -> None:
+    args = build_parser().parse_args([*command, "--max-pages", "1", "--max-file-size-mib", "2"])
 
     assert args.max_pages == 1
+    assert args.max_file_size_mib == 2

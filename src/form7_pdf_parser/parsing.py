@@ -11,6 +11,12 @@ _TRACKING_PATTERN = re.compile(
     flags=re.IGNORECASE | re.DOTALL,
 )
 _AMOUNT_PATTERN = re.compile(r"\b(?:руб|коп)\b", flags=re.IGNORECASE)
+_PHONE_LINE_PATTERN = re.compile(
+    r"(?:(?:тел(?:ефон)?|phone)\.?\s*:?\s*)?\+?[0-9()\-\s]+",
+    flags=re.IGNORECASE,
+)
+_TRACKING_FRAGMENT_PATTERN = re.compile(r"[0-9][0-9\s-]*")
+_TRACKING_GROUP_LENGTHS = ((5, 7), (1, 3), (4, 6), (1, 1))
 
 
 def normalize_lines(text: str) -> list[str]:
@@ -18,14 +24,27 @@ def normalize_lines(text: str) -> list[str]:
 
 
 def _valid_tracking_number(parts: list[str] | tuple[str, ...]) -> str | None:
+    if len(parts) != len(_TRACKING_GROUP_LENGTHS):
+        return None
+    if any(
+        not minimum <= len(part) <= maximum
+        for part, (minimum, maximum) in zip(parts, _TRACKING_GROUP_LENGTHS, strict=True)
+    ):
+        return None
+
     candidate = "".join(parts)
     return candidate if len(candidate) == 14 and candidate.isdigit() else None
 
 
 def parse_tracking_number(text: str, lines: list[str] | None = None) -> str | None:
-    match = _TRACKING_PATTERN.search(text)
-    if match:
-        return _valid_tracking_number(match.groups())
+    """Best-effort extraction of one unambiguous 14-digit tracking number."""
+    direct_candidates = {
+        candidate
+        for match in _TRACKING_PATTERN.finditer(text)
+        if (candidate := _valid_tracking_number(match.groups())) is not None
+    }
+    if direct_candidates:
+        return next(iter(direct_candidates)) if len(direct_candidates) == 1 else None
 
     normalized_lines = lines if lines is not None else normalize_lines(text)
     marker_index = next(
@@ -41,12 +60,32 @@ def parse_tracking_number(text: str, lines: list[str] | None = None) -> str | No
 
     parts: list[str] = []
     for line in normalized_lines[marker_index + 1 : marker_index + 10]:
+        if _TRACKING_FRAGMENT_PATTERN.fullmatch(line) is None:
+            continue
         digits = re.sub(r"\D+", "", line)
         if re.fullmatch(r"\d{1,7}", digits or ""):
             parts.append(digits)
-            if len(parts) >= 4:
-                return _valid_tracking_number(parts[:4])
 
+    candidates: set[str] = set()
+    for start in range(len(parts) - len(_TRACKING_GROUP_LENGTHS) + 1):
+        candidate = _valid_tracking_number(parts[start : start + len(_TRACKING_GROUP_LENGTHS)])
+        if candidate is not None:
+            candidates.add(candidate)
+
+    return next(iter(candidates)) if len(candidates) == 1 else None
+
+
+def _parse_phone_line(line: str) -> str | None:
+    if _PHONE_LINE_PATTERN.fullmatch(line) is None:
+        return None
+
+    digits = re.sub(r"\D+", "", line)
+    if "+" in line and not digits.startswith("7"):
+        return None
+    if len(digits) == 11 and digits[0] in "78":
+        return digits[-10:]
+    if len(digits) == 10:
+        return digits
     return None
 
 
@@ -65,14 +104,14 @@ def _find_amount_line(lines: list[str], phone_index: int, search_start: int) -> 
 def parse_recipient_name_address_phone(
     lines: list[str],
 ) -> tuple[str | None, str | None, str | None]:
+    """Best-effort extraction of the recipient block ending in a supported phone line."""
     phone_index: int | None = None
     phone_digits: str | None = None
 
     for index in range(len(lines) - 1, -1, -1):
-        digits = re.sub(r"\D+", "", lines[index])
-        if len(digits) in (10, 11):
+        phone_digits = _parse_phone_line(lines[index])
+        if phone_digits is not None:
             phone_index = index
-            phone_digits = digits[-10:]
             break
 
     if phone_index is None or phone_digits is None:
@@ -106,6 +145,7 @@ def _page_validation_issues(
 
 
 def parse_page(text: str, page_number: int, *, include_raw_text: bool = False) -> ParsedPage:
+    """Parse normalized fields and validation diagnostics from one extracted text page."""
     if page_number < 1:
         raise ValueError("page_number must be at least 1")
 

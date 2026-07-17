@@ -2,10 +2,44 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 import tempfile
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from pathlib import Path
+
+
+def _sync_directory(directory: Path) -> None:
+    """Best-effort directory sync for durable POSIX rename metadata."""
+    if os.name != "posix":
+        return
+
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    try:
+        descriptor = os.open(directory, flags)
+    except OSError:
+        # Some filesystems do not expose directories as fsync-compatible descriptors.
+        return
+
+    try:
+        with suppress(OSError):
+            os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _replace_file(temporary_path: Path, destination_path: Path) -> None:
+    original_mode: int | None = None
+    if os.name == "nt" and destination_path.exists():
+        original_mode = destination_path.stat().st_mode
+        destination_path.chmod(original_mode | stat.S_IWRITE)
+
+    try:
+        os.replace(temporary_path, destination_path)
+    except OSError:
+        if original_mode is not None and destination_path.exists():
+            destination_path.chmod(original_mode)
+        raise
 
 
 @contextmanager
@@ -25,8 +59,8 @@ def atomic_output_path(destination: str | Path, *, suffix: str) -> Iterator[Path
     try:
         yield temporary_path
         temporary_path.chmod(0o600)
-        os.replace(temporary_path, destination_path)
-        destination_path.chmod(0o600)
+        _replace_file(temporary_path, destination_path)
+        _sync_directory(destination_path.parent)
     finally:
         temporary_path.unlink(missing_ok=True)
 

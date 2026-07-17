@@ -29,6 +29,11 @@ def _source_size(source: PdfSource) -> int | None:
     if not source.seekable():
         return None
 
+    try:
+        return os.fstat(source.fileno()).st_size
+    except (AttributeError, OSError):
+        pass
+
     position = source.tell()
     try:
         source.seek(0, os.SEEK_END)
@@ -50,19 +55,24 @@ def enforce_source_size(source: PdfSource, max_file_size: int) -> None:
 def _bounded_reader_source(
     source: PdfSource,
     max_file_size: int,
-) -> Iterator[Path | BinaryIO]:
+) -> Iterator[BinaryIO]:
     if max_file_size < 1:
         raise ValueError("max_file_size must be positive")
 
     if isinstance(source, (str, os.PathLike)):
         source_path = Path(source)
-        enforce_source_size(source_path, max_file_size)
-        yield source_path
+        with source_path.open("rb") as handle:
+            enforce_source_size(handle, max_file_size)
+            yield handle
         return
 
     if source.seekable():
-        enforce_source_size(source, max_file_size)
-        yield source
+        position = source.tell()
+        try:
+            enforce_source_size(source, max_file_size)
+            yield source
+        finally:
+            source.seek(position)
         return
 
     with tempfile.SpooledTemporaryFile(
@@ -80,6 +90,26 @@ def _bounded_reader_source(
         yield cast(BinaryIO, temporary_source)
 
 
+@contextmanager
+def validated_pdf_reader(
+    source: PdfSource,
+    *,
+    max_pages: int,
+    max_file_size: int,
+) -> Iterator[tuple[PdfReader, BinaryIO]]:
+    """Open one bounded source and validate the shared PDF input contract."""
+    if max_pages < 1:
+        raise ValueError("max_pages must be positive")
+
+    with _bounded_reader_source(source, max_file_size) as reader_source:
+        reader = PdfReader(reader_source, strict=False)
+        if reader.is_encrypted:
+            raise PdfReadError("Encrypted PDFs are not supported")
+        if len(reader.pages) > max_pages:
+            raise PdfLimitError(f"PDF exceeds the {max_pages}-page limit")
+        yield reader, reader_source
+
+
 def parse_pdf(
     source: PdfSource,
     *,
@@ -87,17 +117,18 @@ def parse_pdf(
     max_pages: int = DEFAULT_MAX_PAGES,
     max_file_size: int = DEFAULT_MAX_FILE_SIZE,
 ) -> ParseResult:
-    if max_pages < 1:
-        raise ValueError("max_pages must be positive")
+    """Parse every text page from a bounded PDF path or binary stream.
+
+    Raw page text is excluded unless ``include_raw_text`` is enabled. Expected input and
+    resource failures are reported with the package exception types.
+    """
 
     try:
-        with _bounded_reader_source(source, max_file_size) as reader_source:
-            reader = PdfReader(reader_source, strict=False)
-            if reader.is_encrypted:
-                raise PdfReadError("Encrypted PDFs are not supported")
-            if len(reader.pages) > max_pages:
-                raise PdfLimitError(f"PDF exceeds the {max_pages}-page limit")
-
+        with validated_pdf_reader(
+            source,
+            max_pages=max_pages,
+            max_file_size=max_file_size,
+        ) as (reader, _reader_source):
             pages = tuple(
                 parse_page(
                     page.extract_text() or "",

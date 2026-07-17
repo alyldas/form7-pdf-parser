@@ -12,7 +12,8 @@ PDFs and adding order labels to their pages.
 - Extracts recipient name, phone, address, and a 14-digit tracking number.
 - Processes multi-page PDFs and returns stable JSON.
 - Adds sanitized order labels without using private `pypdf` APIs.
-- Writes JSON and PDFs atomically with owner-only `0600` permissions.
+- Writes JSON and PDFs atomically with owner-only `0600` permissions on POSIX and
+  best-effort private permissions on Windows.
 - Applies default limits of 100 MiB and 500 pages.
 - Keeps full page text out of results unless explicitly requested.
 - Performs no network requests, analytics, or telemetry.
@@ -23,6 +24,7 @@ PDFs and adding order labels to their pages.
 - Scanned documents require OCR before they can be parsed; OCR is not included.
 - Parsing is heuristic because PDF text layout can vary between generators.
 - Only 14-digit tracking numbers are accepted.
+- Rotated pages containing interactive annotations must be flattened before adding labels.
 
 ## Installation
 
@@ -80,10 +82,15 @@ form7-pdf annotate \
 
 Labels retain ASCII letters, digits, spaces, `#`, `-`, `_`, and `/`. Other characters are
 removed, empty normalized labels are ignored, and normalized labels longer than 64 characters
-are rejected.
+are rejected. Labels shrink down to 8 pt when needed to fit the visible page area; labels that
+still do not fit are rejected instead of being clipped.
 
 Successful commands return `0`, processing failures return `1`, and invalid command-line
 arguments return `2`. Errors are written to standard error.
+
+Both commands accept `--max-pages` and `--max-file-size-mib` to override their defensive
+limits. Run `form7-pdf --version` for the installed version and `form7-pdf COMMAND --help` for
+the complete command-specific options.
 
 ## Python API
 
@@ -125,6 +132,10 @@ The JSON contract is intentionally small and stable:
   ]
 }
 ```
+
+The package also exports the lower-level `parse_page`, `parse_tracking_number`, and
+`parse_recipient_name_address_phone` helpers for advanced integrations. These functions are
+best-effort text heuristics; prefer `parse_pdf` when processing complete documents.
 
 ## Privacy and security
 

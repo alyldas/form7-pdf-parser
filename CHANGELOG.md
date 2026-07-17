@@ -20,13 +20,21 @@ The format follows Keep a Changelog 1.1.0, and the project uses Semantic Version
 
 ### Added
 
-- Typed validation issues for invalid parsed pages without changing the JSON contract.
-- A table-driven synthetic parsing corpus covering valid, partial, and invalid layouts.
+- Cross-platform smoke tests and regression coverage for noisy extracted text, CropBox layouts,
+  rotated pages, atomic directory synchronization, and byte-identical PDF copies.
+- Public API documentation for parser, annotation, models, limits, and privacy behavior.
 
 ### Changed
 
-- Overlay labels now preserve allowed ASCII text around digits and reject normalized labels
-  longer than 64 characters.
+- PDF inputs are opened once and validated through one shared size, page, and encryption path.
+- Overlay labels now shrink to the visible page area and empty overlays use a fast copy path.
+- Shared CLI limit arguments and platform-specific output permission guarantees are documented.
+
+### Fixed
+
+- Numeric service lines can no longer shift split tracking-number groups.
+- Tax identifiers and unsupported numeric fields are no longer accepted as phone lines.
+- Labels now respect CropBox origins and page rotation instead of overflowing or moving off-page.
 
 ## [0.1.0] - 2026-07-15
 

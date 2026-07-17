@@ -65,6 +65,44 @@ def test_parse_tracking_number_uses_bounded_line_fallback() -> None:
     assert parse_tracking_number(text) == "00000000000000"
 
 
+def test_parse_tracking_number_ignores_digits_in_service_text() -> None:
+    text = """Оплачивается при вручении
+служебная строка 1
+000000
+00
+00000
+0
+"""
+
+    assert parse_tracking_number(text) == "00000000000000"
+
+
+def test_parse_tracking_number_rejects_ambiguous_fallback_candidates() -> None:
+    text = """Оплачивается при вручении
+служебная строка
+000000
+00
+00000
+0
+111111
+11
+11111
+1
+"""
+
+    assert parse_tracking_number(text) is None
+
+
+def test_parse_tracking_number_rejects_ambiguous_direct_candidates() -> None:
+    text = """Оплачивается при вручении
+000000 00 00000 0
+Оплачивается при вручении
+111111 11 11111 1
+"""
+
+    assert parse_tracking_number(text) is None
+
+
 def test_parse_tracking_number_rejects_non_fourteen_digit_candidate() -> None:
     text = "Оплачивается при вручении 00000 0 0000 0"
 
@@ -77,6 +115,42 @@ def test_parse_recipient_returns_phone_when_name_block_is_empty() -> None:
         None,
         "0000000000",
     )
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "Тел.: +7 (000) 000-00-00",
+        "8 (000) 000-00-00",
+        "0000000000",
+    ],
+)
+def test_parse_recipient_accepts_supported_phone_formats(line: str) -> None:
+    assert parse_recipient_name_address_phone([line]) == (None, None, "0000000000")
+
+
+def test_parse_recipient_ignores_numeric_identifiers_after_phone() -> None:
+    lines = [
+        "100 руб 00 коп",
+        "Тестов Тест Тестович",
+        "000000, г. Примерск",
+        "+7 (000) 000-00-00",
+        "ИНН 1234567890",
+    ]
+
+    assert parse_recipient_name_address_phone(lines) == (
+        "Тестов Тест Тестович",
+        "000000, г. Примерск",
+        "0000000000",
+    )
+
+
+def test_parse_recipient_rejects_non_phone_eleven_digit_number() -> None:
+    assert parse_recipient_name_address_phone(["12345678901"]) == (None, None, None)
+
+
+def test_parse_recipient_rejects_plus_eight_phone_prefix() -> None:
+    assert parse_recipient_name_address_phone(["+8 (000) 000-00-00"]) == (None, None, None)
 
 
 def test_invalid_page_has_stable_null_fields() -> None:

@@ -52,6 +52,15 @@ def _load_overlays(path: Path) -> list[Overlay]:
     return overlays
 
 
+def _add_pdf_limit_arguments(command: argparse.ArgumentParser) -> None:
+    command.add_argument("--max-pages", type=_positive_int, default=DEFAULT_MAX_PAGES)
+    command.add_argument(
+        "--max-file-size-mib",
+        type=_positive_int,
+        default=DEFAULT_MAX_FILE_SIZE // (1024 * 1024),
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="form7-pdf",
@@ -68,23 +77,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Include full extracted page text; may contain personal data",
     )
-    parse_command.add_argument("--max-pages", type=_positive_int, default=DEFAULT_MAX_PAGES)
-    parse_command.add_argument(
-        "--max-file-size-mib",
-        type=_positive_int,
-        default=DEFAULT_MAX_FILE_SIZE // (1024 * 1024),
-    )
+    _add_pdf_limit_arguments(parse_command)
 
     annotate_command = subparsers.add_parser("annotate", help="Add page labels to a PDF")
     annotate_command.add_argument("--input", required=True, type=Path, help="Input PDF path")
     annotate_command.add_argument("--overlay", required=True, type=Path, help="Overlay JSON path")
     annotate_command.add_argument("--output", required=True, type=Path, help="Output PDF path")
-    annotate_command.add_argument("--max-pages", type=_positive_int, default=DEFAULT_MAX_PAGES)
-    annotate_command.add_argument(
-        "--max-file-size-mib",
-        type=_positive_int,
-        default=DEFAULT_MAX_FILE_SIZE // (1024 * 1024),
-    )
+    _add_pdf_limit_arguments(annotate_command)
 
     return parser
 
