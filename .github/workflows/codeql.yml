@@ -3,10 +3,10 @@ name: Dependency audit
 on:
   push:
     branches: [main]
-    paths: [pyproject.toml]
+    paths: [pyproject.toml, .github/workflows/codeql.yml]
   pull_request:
     branches: [main]
-    paths: [pyproject.toml]
+    paths: [pyproject.toml, .github/workflows/codeql.yml]
   schedule:
     - cron: "27 3 * * 1"
   workflow_dispatch:
