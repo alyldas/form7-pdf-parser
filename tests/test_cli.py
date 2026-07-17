@@ -42,6 +42,21 @@ def test_parse_command_can_include_raw_text(tmp_path: Path) -> None:
     assert "Synthetic Form 7 fixture" in payload["pages"][0]["raw_text"]
 
 
+def test_parse_command_rejects_same_input_and_output(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    source = tmp_path / "form7.pdf"
+    source.write_bytes(FIXTURE.read_bytes())
+    original = source.read_bytes()
+
+    exit_code = main(["parse", "--input", str(source), "--output", str(source)])
+
+    assert exit_code == 1
+    assert "different" in capsys.readouterr().err
+    assert source.read_bytes() == original
+
+
 def test_annotate_command_writes_pdf(tmp_path: Path) -> None:
     overlay = tmp_path / "overlay.json"
     output = tmp_path / "annotated.pdf"

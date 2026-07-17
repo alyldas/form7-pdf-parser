@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from io import BytesIO
+from io import BytesIO, UnsupportedOperation
 from pathlib import Path
 
 import pytest
@@ -10,6 +10,17 @@ from form7_pdf_parser import PdfLimitError, PdfReadError, parse_pdf
 from form7_pdf_parser.pdf import enforce_source_size
 
 FIXTURE = Path(__file__).parent / "fixtures" / "synthetic-form7.pdf"
+
+
+class NonSeekableStream(BytesIO):
+    def seekable(self) -> bool:
+        return False
+
+    def seek(self, offset: int, whence: int = 0) -> int:
+        raise UnsupportedOperation
+
+    def tell(self) -> int:
+        raise UnsupportedOperation
 
 
 def test_parse_pdf_reads_synthetic_fixture() -> None:
@@ -39,12 +50,23 @@ def test_parse_pdf_supports_binary_streams() -> None:
     assert result.page_count == 2
 
 
-def test_unknown_stream_size_does_not_fail_closed() -> None:
-    class NonSeekableStream(BytesIO):
-        def seekable(self) -> bool:
-            return False
+def test_parse_pdf_spools_non_seekable_stream_within_limit() -> None:
+    payload = FIXTURE.read_bytes()
 
-    enforce_source_size(NonSeekableStream(b"synthetic"), max_file_size=1)
+    result = parse_pdf(NonSeekableStream(payload), max_file_size=len(payload))
+
+    assert result.page_count == 2
+
+
+def test_parse_pdf_enforces_size_limit_for_non_seekable_stream() -> None:
+    payload = FIXTURE.read_bytes()
+
+    with pytest.raises(PdfLimitError, match="size limit"):
+        parse_pdf(NonSeekableStream(payload), max_file_size=len(payload) - 1)
+
+
+def test_enforce_source_size_allows_unknown_non_seekable_size() -> None:
+    enforce_source_size(NonSeekableStream(b"larger than the limit"), max_file_size=1)
 
 
 def test_parse_pdf_enforces_page_limit() -> None:

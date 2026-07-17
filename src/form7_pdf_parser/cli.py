@@ -94,6 +94,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         max_file_size = args.max_file_size_mib * 1024 * 1024
         if args.command == "parse":
+            if args.output.exists() and args.input.samefile(args.output):
+                raise ValueError("Input PDF and output JSON paths must be different")
+
             result = parse_pdf(
                 args.input,
                 include_raw_text=args.include_raw_text,
