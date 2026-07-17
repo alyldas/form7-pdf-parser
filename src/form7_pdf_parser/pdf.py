@@ -30,10 +30,11 @@ def _source_size(source: PdfSource) -> int | None:
         return None
 
     position = source.tell()
-    source.seek(0, os.SEEK_END)
-    size = source.tell()
-    source.seek(position)
-    return size
+    try:
+        source.seek(0, os.SEEK_END)
+        return source.tell()
+    finally:
+        source.seek(position)
 
 
 def enforce_source_size(source: PdfSource, max_file_size: int) -> None:
