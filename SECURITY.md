@@ -6,7 +6,8 @@ Security fixes are provided for the latest minor release.
 
 | Version | Supported |
 | --- | --- |
-| 0.1.x | Yes |
+| 0.2.x | Yes |
+| 0.1.x | No |
 | Older | No |
 
 ## Reporting a vulnerability
@@ -25,4 +26,3 @@ reproducibility, and affected versions before a coordinated fix is prepared.
 This package parses complex PDF input and should not be treated as a security sandbox. For
 untrusted files, run it in an isolated process with CPU, memory, file-size, and execution-time
 limits. The package performs no network requests or telemetry.
-

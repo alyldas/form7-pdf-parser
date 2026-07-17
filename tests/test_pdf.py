@@ -59,6 +59,32 @@ def test_parse_pdf_supports_binary_streams() -> None:
     assert result.page_count == 2
 
 
+def test_parse_pdf_restores_seekable_stream_position() -> None:
+    stream = BytesIO(FIXTURE.read_bytes())
+    stream.seek(3)
+
+    parse_pdf(stream)
+
+    assert stream.tell() == 3
+
+
+def test_parse_pdf_opens_path_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    open_count = 0
+    original_open = Path.open
+
+    def counting_open(path: Path, *args: object, **kwargs: object):  # type: ignore[no-untyped-def]
+        nonlocal open_count
+        if path == FIXTURE:
+            open_count += 1
+        return original_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", counting_open)
+
+    parse_pdf(FIXTURE)
+
+    assert open_count == 1
+
+
 def test_parse_pdf_spools_non_seekable_stream_within_limit() -> None:
     payload = FIXTURE.read_bytes()
 

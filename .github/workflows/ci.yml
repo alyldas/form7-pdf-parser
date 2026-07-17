@@ -92,8 +92,25 @@ jobs:
       - run: python -m pip check
       - run: pytest
 
+  platform-smoke:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e ".[dev]"
+      - run: python -m pytest -o "addopts=-ra --strict-config --strict-markers"
+
   package:
-    needs: [quality, tests, minimum-dependencies]
+    needs: [quality, tests, minimum-dependencies, platform-smoke]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -103,10 +120,12 @@ jobs:
           QUALITY_RESULT: ${{ needs.quality.result }}
           TESTS_RESULT: ${{ needs.tests.result }}
           MINIMUM_DEPENDENCIES_RESULT: ${{ needs.minimum-dependencies.result }}
+          PLATFORM_SMOKE_RESULT: ${{ needs.platform-smoke.result }}
         run: |
           test "$QUALITY_RESULT" = success
           test "$TESTS_RESULT" = success
           test "$MINIMUM_DEPENDENCIES_RESULT" = success
+          test "$PLATFORM_SMOKE_RESULT" = success
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
@@ -123,6 +142,10 @@ jobs:
           /tmp/form7-wheel-smoke/bin/python -m pip install dist/*.whl
           /tmp/form7-wheel-smoke/bin/form7-pdf --version
           /tmp/form7-wheel-smoke/bin/python -m form7_pdf_parser --version
+          python -m venv /tmp/form7-sdist-smoke
+          /tmp/form7-sdist-smoke/bin/python -m pip install dist/*.tar.gz
+          /tmp/form7-sdist-smoke/bin/form7-pdf --version
+          /tmp/form7-sdist-smoke/bin/python -m form7_pdf_parser --version
       - uses: actions/upload-artifact@v7
         with:
           name: distributions

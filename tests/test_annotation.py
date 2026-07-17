@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import os
 import stat
 from pathlib import Path
 
 import pytest
 from pypdf import PageObject, PdfReader, PdfWriter
+from pypdf.generic import ArrayObject, NameObject
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfbase.pdfmetrics import stringWidth
 
 from form7_pdf_parser import (
     Overlay,
@@ -13,7 +17,9 @@ from form7_pdf_parser import (
     PdfReadError,
     annotate_pdf,
     normalize_overlay_label,
+    parse_pdf,
 )
+from form7_pdf_parser.annotation import _overlay_layout
 
 FIXTURE = Path(__file__).parent / "fixtures" / "synthetic-form7.pdf"
 
@@ -26,7 +32,8 @@ def test_annotate_pdf_adds_sanitized_label_and_uses_owner_only_mode(tmp_path: Pa
     reader = PdfReader(output)
     assert len(reader.pages) == 2
     assert "Order #6904" in (reader.pages[0].extract_text() or "")
-    assert stat.S_IMODE(output.stat().st_mode) == 0o600
+    if os.name == "posix":
+        assert stat.S_IMODE(output.stat().st_mode) == 0o600
 
 
 def test_annotate_pdf_isolates_cloned_resources_around_merge(
@@ -34,28 +41,47 @@ def test_annotate_pdf_isolates_cloned_resources_around_merge(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     events: list[str] = []
-    original_merge_page = PageObject.merge_page
+    original_merge_translated_page = PageObject.merge_translated_page
     original_reset_translation = PdfWriter.reset_translation
 
-    def record_merge(
+    def record_merge_translated(
         page: PageObject,
         overlay: PageObject,
+        tx: float,
+        ty: float,
         *args: object,
         **kwargs: object,
     ) -> None:
         events.append("merge")
-        original_merge_page(page, overlay, *args, **kwargs)
+        original_merge_translated_page(page, overlay, tx, ty, *args, **kwargs)
 
     def record_reset(writer: PdfWriter, reader: PdfReader) -> None:
         events.append("reset")
         original_reset_translation(writer, reader)
 
-    monkeypatch.setattr(PageObject, "merge_page", record_merge)
+    monkeypatch.setattr(PageObject, "merge_translated_page", record_merge_translated)
     monkeypatch.setattr(PdfWriter, "reset_translation", record_reset)
 
     annotate_pdf(FIXTURE, tmp_path / "annotated.pdf", [Overlay(1, "SAFE")])
 
     assert events == ["reset", "merge", "reset"]
+
+
+def test_overlay_layout_fits_maximum_label_within_a4() -> None:
+    width, height = A4
+    label = "A" * 64
+
+    text_x, text_y, font_size = _overlay_layout(width, height, label)
+
+    assert 8 <= font_size <= 18
+    assert text_x >= 40
+    assert text_x + stringWidth(label, "Helvetica-Bold", font_size) <= width - 40
+    assert text_y >= 0
+
+
+def test_overlay_layout_rejects_page_too_narrow_for_label() -> None:
+    with pytest.raises(OverlayError, match="fit"):
+        _overlay_layout(100, 100, "A" * 64)
 
 
 def test_annotate_pdf_replaces_readonly_output_atomically(tmp_path: Path) -> None:
@@ -66,7 +92,88 @@ def test_annotate_pdf_replaces_readonly_output_atomically(tmp_path: Path) -> Non
     annotate_pdf(FIXTURE, output, [Overlay(page_number=2, order_label="#7")])
 
     assert output.read_bytes().startswith(b"%PDF-")
-    assert stat.S_IMODE(output.stat().st_mode) == 0o600
+    if os.name == "posix":
+        assert stat.S_IMODE(output.stat().st_mode) == 0o600
+
+
+def test_annotate_pdf_without_effective_labels_is_byte_identical(tmp_path: Path) -> None:
+    output = tmp_path / "copy.pdf"
+
+    annotate_pdf(FIXTURE, output, [Overlay(page_number=1, order_label="Только текст")])
+
+    assert output.read_bytes() == FIXTURE.read_bytes()
+
+
+def test_annotate_pdf_preserves_parsed_shipping_fields(tmp_path: Path) -> None:
+    output = tmp_path / "annotated.pdf"
+
+    before = parse_pdf(FIXTURE)
+    annotate_pdf(FIXTURE, output, [Overlay(page_number=1, order_label="Order #6904")])
+    after = parse_pdf(output)
+
+    assert [page.tracking_number for page in after.pages] == [
+        page.tracking_number for page in before.pages
+    ]
+    assert [page.recipient_name for page in after.pages] == [
+        page.recipient_name for page in before.pages
+    ]
+    assert [page.recipient_address for page in after.pages] == [
+        page.recipient_address for page in before.pages
+    ]
+    assert [page.recipient_phone for page in after.pages] == [
+        page.recipient_phone for page in before.pages
+    ]
+    assert "Order #6904" in (PdfReader(output).pages[0].extract_text() or "")
+
+
+def test_annotate_pdf_uses_cropbox_coordinates(tmp_path: Path) -> None:
+    source = tmp_path / "cropped.pdf"
+    output = tmp_path / "annotated.pdf"
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=400, height=300)
+    page.cropbox.lower_left = (50, 40)
+    page.cropbox.upper_right = (350, 260)
+    with source.open("wb") as handle:
+        writer.write(handle)
+
+    annotate_pdf(source, output, [Overlay(page_number=1, order_label="CROP")])
+
+    output_page = PdfReader(output).pages[0]
+    assert "CROP" in (output_page.extract_text() or "")
+    assert tuple(float(value) for value in output_page.cropbox) == (50.0, 40.0, 350.0, 260.0)
+
+
+@pytest.mark.parametrize("rotation", [90, 180, 270])
+def test_annotate_pdf_transfers_page_rotation_before_merge(
+    tmp_path: Path,
+    rotation: int,
+) -> None:
+    source = tmp_path / f"rotated-{rotation}.pdf"
+    output = tmp_path / "annotated.pdf"
+    writer = PdfWriter()
+    writer.add_blank_page(width=300, height=400).rotate(rotation)
+    with source.open("wb") as handle:
+        writer.write(handle)
+
+    annotate_pdf(source, output, [Overlay(page_number=1, order_label=f"ROTATE {rotation}")])
+
+    output_page = PdfReader(output).pages[0]
+    assert output_page.rotation == 0
+    assert f"ROTATE {rotation}" in (output_page.extract_text() or "")
+
+
+def test_annotate_pdf_rejects_rotated_page_with_interactive_annotations(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "interactive.pdf"
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=300, height=400).rotate(90)
+    page[NameObject("/Annots")] = ArrayObject()
+    with source.open("wb") as handle:
+        writer.write(handle)
+
+    with pytest.raises(OverlayError, match="interactive"):
+        annotate_pdf(source, tmp_path / "output.pdf", [Overlay(1, "SAFE")])
 
 
 def test_annotate_pdf_ignores_empty_sanitized_label(tmp_path: Path) -> None:
