@@ -48,16 +48,18 @@ def _overlay_map(overlays: Iterable[Overlay]) -> dict[int, str]:
     for overlay in overlays:
         if overlay.page_number < 1:
             raise OverlayError("Overlay page numbers must be positive")
-        if overlay.page_number in result:
-            raise OverlayError(f"Duplicate overlay for page {overlay.page_number}")
 
         label = normalize_overlay_label(overlay.order_label)
         if len(label) > MAX_OVERLAY_LABEL_LENGTH:
             raise OverlayError(
                 f"Overlay labels must not exceed {MAX_OVERLAY_LABEL_LENGTH} characters"
             )
-        if label:
-            result[overlay.page_number] = label
+        if not label:
+            continue
+        if overlay.page_number in result:
+            raise OverlayError(f"Duplicate overlay for page {overlay.page_number}")
+
+        result[overlay.page_number] = label
 
     return result
 
@@ -75,13 +77,13 @@ def annotate_pdf(
 
     source_path = Path(source)
     destination_path = Path(destination)
-    if destination_path.exists() and source_path.samefile(destination_path):
-        raise OverlayError("Input and output PDF paths must be different")
-
-    enforce_source_size(source_path, max_file_size)
     labels = _overlay_map(overlays)
 
     try:
+        if destination_path.exists() and source_path.samefile(destination_path):
+            raise OverlayError("Input and output PDF paths must be different")
+
+        enforce_source_size(source_path, max_file_size)
         reader = PdfReader(source_path, strict=False)
         if reader.is_encrypted:
             raise PdfReadError("Encrypted PDFs are not supported")
@@ -92,10 +94,13 @@ def annotate_pdf(
 
         writer = PdfWriter()
         for page_number, page in enumerate(reader.pages, start=1):
-            writer.add_page(page)
-            writer_page = writer.pages[-1]
             label = labels.get(page_number)
             if label:
+                writer.reset_translation(reader)
+
+            writer.add_page(page)
+            if label:
+                writer_page = writer.pages[-1]
                 writer_page.merge_page(
                     _overlay_page(
                         float(writer_page.mediabox.width),
@@ -103,6 +108,7 @@ def annotate_pdf(
                         label,
                     )
                 )
+                writer.reset_translation(reader)
 
         with (
             atomic_output_path(destination_path, suffix=".pdf") as temporary_path,

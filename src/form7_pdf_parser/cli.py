@@ -25,11 +25,13 @@ def _positive_int(value: str) -> int:
 
 
 def _load_overlays(path: Path) -> list[Overlay]:
-    if path.stat().st_size > MAX_OVERLAY_JSON_SIZE:
+    with path.open("rb") as handle:
+        raw_payload = handle.read(MAX_OVERLAY_JSON_SIZE + 1)
+
+    if len(raw_payload) > MAX_OVERLAY_JSON_SIZE:
         raise OverlayError("Overlay JSON exceeds the 1 MiB size limit")
 
-    with path.open(encoding="utf-8") as handle:
-        payload: Any = json.load(handle)
+    payload: Any = json.loads(raw_payload.decode("utf-8"))
 
     raw_overlays = payload.get("overlays") if isinstance(payload, dict) else None
     if not isinstance(raw_overlays, list):

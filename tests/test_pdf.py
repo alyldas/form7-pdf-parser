@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from io import BytesIO, UnsupportedOperation
 from pathlib import Path
 
@@ -21,6 +22,14 @@ class NonSeekableStream(BytesIO):
 
     def tell(self) -> int:
         raise UnsupportedOperation
+
+
+class FailingEndSeekStream(BytesIO):
+    def seek(self, offset: int, whence: int = 0) -> int:
+        if whence == os.SEEK_END:
+            super().seek(2)
+            raise OSError("unable to measure stream")
+        return super().seek(offset, whence)
 
 
 def test_parse_pdf_reads_synthetic_fixture() -> None:
@@ -67,6 +76,16 @@ def test_parse_pdf_enforces_size_limit_for_non_seekable_stream() -> None:
 
 def test_enforce_source_size_allows_unknown_non_seekable_size() -> None:
     enforce_source_size(NonSeekableStream(b"larger than the limit"), max_file_size=1)
+
+
+def test_enforce_source_size_restores_stream_position_after_error() -> None:
+    stream = FailingEndSeekStream(b"synthetic payload")
+    stream.seek(3)
+
+    with pytest.raises(OSError, match="unable to measure"):
+        enforce_source_size(stream, max_file_size=100)
+
+    assert stream.tell() == 3
 
 
 def test_parse_pdf_enforces_page_limit() -> None:

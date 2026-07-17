@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from form7_pdf_parser.cli import build_parser, main
+from form7_pdf_parser.cli import MAX_OVERLAY_JSON_SIZE, _load_overlays, build_parser, main
 
 FIXTURE = Path(__file__).parent / "fixtures" / "synthetic-form7.pdf"
 
@@ -135,6 +135,14 @@ def test_annotate_command_rejects_oversized_overlay_json(
 
     assert exit_code == 1
     assert "1 MiB" in capsys.readouterr().err
+
+
+def test_load_overlays_accepts_json_at_exact_size_limit(tmp_path: Path) -> None:
+    overlay = tmp_path / "overlay.json"
+    payload = b'{"overlays":[]}'
+    overlay.write_bytes(payload + b" " * (MAX_OVERLAY_JSON_SIZE - len(payload)))
+
+    assert _load_overlays(overlay) == []
 
 
 def test_parse_command_reports_processing_error(

@@ -4,7 +4,7 @@ import stat
 from pathlib import Path
 
 import pytest
-from pypdf import PdfReader, PdfWriter
+from pypdf import PageObject, PdfReader, PdfWriter
 
 from form7_pdf_parser import (
     Overlay,
@@ -29,6 +29,35 @@ def test_annotate_pdf_adds_sanitized_label_and_uses_owner_only_mode(tmp_path: Pa
     assert stat.S_IMODE(output.stat().st_mode) == 0o600
 
 
+def test_annotate_pdf_isolates_cloned_resources_around_merge(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+    original_merge_page = PageObject.merge_page
+    original_reset_translation = PdfWriter.reset_translation
+
+    def record_merge(
+        page: PageObject,
+        overlay: PageObject,
+        *args: object,
+        **kwargs: object,
+    ) -> None:
+        events.append("merge")
+        original_merge_page(page, overlay, *args, **kwargs)
+
+    def record_reset(writer: PdfWriter, reader: PdfReader) -> None:
+        events.append("reset")
+        original_reset_translation(writer, reader)
+
+    monkeypatch.setattr(PageObject, "merge_page", record_merge)
+    monkeypatch.setattr(PdfWriter, "reset_translation", record_reset)
+
+    annotate_pdf(FIXTURE, tmp_path / "annotated.pdf", [Overlay(1, "SAFE")])
+
+    assert events == ["reset", "merge", "reset"]
+
+
 def test_annotate_pdf_replaces_readonly_output_atomically(tmp_path: Path) -> None:
     output = tmp_path / "annotated.pdf"
     output.write_text("stale", encoding="utf-8")
@@ -46,6 +75,24 @@ def test_annotate_pdf_ignores_empty_sanitized_label(tmp_path: Path) -> None:
     annotate_pdf(FIXTURE, output, [Overlay(page_number=1, order_label="Только текст")])
 
     assert "Только текст" not in (PdfReader(output).pages[0].extract_text() or "")
+
+
+@pytest.mark.parametrize(
+    "overlays",
+    [
+        [Overlay(1, "Только текст"), Overlay(1, "SAFE")],
+        [Overlay(1, "SAFE"), Overlay(1, "Только текст")],
+    ],
+)
+def test_annotate_pdf_ignores_empty_label_before_duplicate_check(
+    tmp_path: Path,
+    overlays: list[Overlay],
+) -> None:
+    output = tmp_path / "annotated.pdf"
+
+    annotate_pdf(FIXTURE, output, overlays)
+
+    assert "SAFE" in (PdfReader(output).pages[0].extract_text() or "")
 
 
 def test_annotate_pdf_rejects_duplicate_pages(tmp_path: Path) -> None:
@@ -105,6 +152,11 @@ def test_annotate_pdf_wraps_invalid_pdf_errors(tmp_path: Path) -> None:
 
     with pytest.raises(PdfReadError, match="Unable to annotate"):
         annotate_pdf(invalid, tmp_path / "output.pdf", [])
+
+
+def test_annotate_pdf_wraps_missing_pdf_errors(tmp_path: Path) -> None:
+    with pytest.raises(PdfReadError, match="Unable to annotate"):
+        annotate_pdf(tmp_path / "missing.pdf", tmp_path / "output.pdf", [])
 
 
 @pytest.mark.parametrize(
