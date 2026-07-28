@@ -87,7 +87,7 @@ jobs:
           gh release view "$tag_name" --repo "$GITHUB_REPOSITORY" >/dev/null
           echo "release_found=true" >> "$GITHUB_OUTPUT"
           echo "tag_name=$tag_name" >> "$GITHUB_OUTPUT"
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         if: steps.release.outputs.release_found == 'true'
         with:
           python-version: "3.14"
