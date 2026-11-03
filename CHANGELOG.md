@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 The format follows Keep a Changelog 1.1.0, and the project uses Semantic Versioning 2.0.0.
 
+## [0.3.0](https://github.com/alyldas/form7-pdf-parser/compare/v0.2.2...v0.3.0) (2026-11-03)
+
+
+### Features
+
+* **pdf:** added priority waybill parsing and safe order headers ([#14](https://github.com/alyldas/form7-pdf-parser/issues/14)) ([cf08b4a](https://github.com/alyldas/form7-pdf-parser/commit/cf08b4a7703dc29a0dc83c6af045cf17077706ff))
+
 ## [0.2.2](https://github.com/alyldas/form7-pdf-parser/compare/v0.2.1...v0.2.2) (2026-07-28)
 
 
