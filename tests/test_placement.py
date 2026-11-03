@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pypdfium2 as pdfium
 import pytest
+from pdf_assertions import drawn_label
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import ArrayObject, DictionaryObject, FloatObject, NameObject, RectangleObject
 from reportlab.lib.pagesizes import A4, A6
@@ -69,13 +70,11 @@ def _pdf(
 def _label_position(path: Path) -> tuple[float, float, float]:
     positions = []
 
-    def visit(text, cm, tm, font, size):
-        if "Заказ №" in text:
-            positions.append(
-                (tm[4] * cm[0] + tm[5] * cm[2] + cm[4], tm[4] * cm[1] + tm[5] * cm[3] + cm[5], size)
-            )
+    def visit(operator, operands, cm, tm):
+        if operator == b"Do" and str(operands[0]).startswith("/FormXob.g1047"):
+            positions.append((cm[4], cm[5], (cm[0] ** 2 + cm[1] ** 2) ** 0.5 * 1000))
 
-    PdfReader(path).pages[0].extract_text(visitor_text=visit)
+    PdfReader(path).pages[0].extract_text(visitor_operand_before=visit)
     assert len(positions) == 1
     return positions[0]
 
@@ -90,7 +89,8 @@ def test_legacy_label_uses_approved_header_position(tmp_path: Path) -> None:
     assert y == pytest.approx(815, abs=0.1)
     assert size == 12
     text = PdfReader(output).pages[0].extract_text()
-    assert "Заказ № 1234" in text
+    assert drawn_label(PdfReader(output).pages[0]) == "Заказ № 1234"
+    assert "Заказ №" not in text
     assert "Order" not in text
 
 
@@ -135,7 +135,7 @@ def test_compact_waybill_crop_and_rotation_preserve_shipping_fields(
     annotate_pdf(source, output, [Overlay(1, "1234")])
 
     assert parse_pdf(output) == parse_pdf(source)
-    assert "Заказ № 1234" in PdfReader(output).pages[0].extract_text()
+    assert drawn_label(PdfReader(output).pages[0]) == "Заказ № 1234"
     assert PdfReader(output).pages[0].rotation == 0
 
 
@@ -208,7 +208,7 @@ def test_five_and_six_digit_orders_use_small_font(tmp_path: Path, number: str, k
     annotate_pdf(source, output, [Overlay(1, number)])
 
     assert _label_position(output)[2] == 12
-    assert f"Заказ № {number}" in PdfReader(output).pages[0].extract_text()
+    assert f"Заказ № {number}" == drawn_label(PdfReader(output).pages[0])
     assert parse_pdf(output) == parse_pdf(source)
 
 
@@ -232,11 +232,12 @@ def test_fallback_label_is_upright_at_visible_top_right(
     assert result.rotation == 0
     directions = []
 
-    def visit(text, cm, tm, font, size):
-        if "Заказ №" in text:
-            directions.append((tm[0] * cm[0] + tm[1] * cm[2], tm[0] * cm[1] + tm[1] * cm[3]))
+    def visit(operator, operands, cm, tm):
+        if operator == b"Do" and str(operands[0]).startswith("/FormXob.g1047"):
+            scale = (cm[0] ** 2 + cm[1] ** 2) ** 0.5
+            directions.append((cm[0] / scale, cm[1] / scale))
 
-    result.extract_text(visitor_text=visit)
+    result.extract_text(visitor_operand_before=visit)
     assert directions == [pytest.approx((1, 0))]
     with (
         pdfium.PdfDocument(str(output)) as document,
@@ -303,7 +304,7 @@ def test_recipient_caption_variants_share_placement_guards(
     output = tmp_path / "out.pdf"
     if scenario == "safe":
         annotate_pdf(source, output, [Overlay(1, "001234")])
-        assert "Заказ № 001234" in PdfReader(output).pages[0].extract_text()
+        assert drawn_label(PdfReader(output).pages[0]) == "Заказ № 001234"
     else:
         output.write_bytes(b"existing output")
         with pytest.raises(OverlayError, match="7 mm" if scenario == "close" else "multiple"):
@@ -380,7 +381,7 @@ def test_direct_and_indirect_annotation_geometry(
         annotate_pdf(source, output, [Overlay(1, "001234")])
         page = PdfReader(output).pages[0]
         assert len(page.annotations) == 1
-        assert "Заказ № 001234" in page.extract_text()
+        assert drawn_label(page) == "Заказ № 001234"
 
 
 @pytest.mark.parametrize("coordinates", [b"[310 285 280 265]", b"[8 0 R 9 0 R 10 0 R 11 0 R]"])

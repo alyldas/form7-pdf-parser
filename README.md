@@ -80,8 +80,10 @@ Pass the order number as an ASCII digit string; leading zeros are preserved. An 
 Five- and six-digit order numbers are supported, including leading zeros. Numbers longer
 than 64 digits are rejected. Empty strings are ignored. No additional barcode is generated.
 
-Labels use Noto Sans Bold in a verified free header area. Occupied areas, labels that do not
-fit, and multiple forms on one page are rejected; an existing output remains unchanged.
+Labels use shared vector outlines of Noto Sans Bold in a verified free header area, without
+embedding a label font. They remain sharp at any zoom level but are not extractable text.
+Source fonts and images are reused across pages. Occupied areas, labels that do not fit, and
+multiple forms on one page are rejected; an existing output remains unchanged.
 See [label placement](docs/formats.md#label-placement) for geometry and safety checks.
 
 Successful commands return `0`, processing failures return `1`, and invalid command-line

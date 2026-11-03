@@ -33,7 +33,10 @@ assert copy.read_bytes() == source.read_bytes()
 assert "Form7NotoSansBold" not in getRegisteredFontNames()
 annotate_pdf(source, labelled, [Overlay(1, "001234")])
 assert "Form7NotoSansBold" in getRegisteredFontNames()
-assert "Заказ № 001234" in PdfReader(labelled).pages[0].extract_text()
+result = PdfReader(labelled)
+assert len(result.pages) == 2
+assert result.pages[0].extract_text() == PdfReader(source).pages[0].extract_text()
+assert result.pages[0]["/Resources"]["/XObject"]
 """
     result = subprocess.run(  # noqa: S603 — fixed script and local synthetic PDF, no shell
         [

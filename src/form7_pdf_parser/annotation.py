@@ -9,15 +9,26 @@ from io import BytesIO
 from math import hypot, isfinite
 from pathlib import Path
 from threading import Lock
-from typing import BinaryIO, NamedTuple
+from typing import BinaryIO, NamedTuple, cast
 
 import pypdfium2 as pdfium  # type: ignore[import-untyped]
+from fontTools.pens.reportLabPen import ReportLabPen  # type: ignore[import-untyped]
+from fontTools.ttLib import TTFont as OutlineFont  # type: ignore[import-untyped]
 from pypdf import PageObject, PdfReader, PdfWriter
 from pypdf.errors import PyPdfError
-from pypdf.generic import ArrayObject, DictionaryObject, FloatObject, NullObject, NumberObject
+from pypdf.generic import (
+    ArrayObject,
+    DecodedStreamObject,
+    DictionaryObject,
+    FloatObject,
+    NameObject,
+    NullObject,
+    NumberObject,
+)
 from reportlab.pdfbase.pdfmetrics import getRegisteredFontNames, registerFont, stringWidth
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen.canvas import Canvas
+from reportlab.pdfgen.pathobject import PDFPathObject
 
 from .atomic import atomic_output_path
 from .exceptions import OverlayError, PdfReadError
@@ -231,17 +242,80 @@ def _check_overlay_space(page: PageObject, label: str, layout: tuple[float, floa
         )
 
 
-def _overlay_page(
-    width: float, height: float, label: str, layout: tuple[float, float, float]
-) -> PageObject:
+class _GlyphPath(PDFPathObject):
+    def closePath(self) -> None:
+        self.close()
+
+
+def _overlay_glyphs(labels: Iterable[str]) -> DictionaryObject:
+    """Draw each used glyph once as a shared vector form, without embedding fonts."""
     buffer = BytesIO()
-    canvas = Canvas(buffer, pagesize=(width, height), pageCompression=1, invariant=1)
-    text_x, text_y, font_size = layout
-    canvas.setFont(_OVERLAY_FONT_NAME, font_size)
-    canvas.drawString(text_x, text_y, label)
+    canvas = Canvas(
+        buffer,
+        pageCompression=1,
+        invariant=1,
+        initialFontName=_OVERLAY_FONT_NAME,  # type: ignore[arg-type] # Incorrect upstream stub.
+    )
+    characters = sorted(set("".join(labels)) - {" "})
+    with OutlineFont(Path(__file__).parent / "fonts/NotoSans-Bold.ttf") as font:
+        glyphs = font.getGlyphSet()
+        cmap = font.getBestCmap()
+        units = font["head"].unitsPerEm
+        for character in characters:
+            name = f"g{ord(character)}"
+            canvas.beginForm(name, -1000, -1000, 2000, 2000)
+            canvas.scale(1000 / units, 1000 / units)
+            path = _GlyphPath()
+            glyphs[cmap[ord(character)]].draw(ReportLabPen(glyphs, path))
+            canvas.drawPath(path, stroke=0, fill=1)
+            canvas.endForm()
+            canvas.doForm(name)
     canvas.save()
-    buffer.seek(0)
-    return PdfReader(buffer, strict=False).pages[0]
+    resources = cast(DictionaryObject, PdfReader(buffer, strict=False).pages[0]["/Resources"])
+    return cast(DictionaryObject, resources["/XObject"])
+
+
+def _overlay_page(
+    width: float,
+    height: float,
+    label: str,
+    layout: tuple[float, float, float],
+    glyphs: DictionaryObject,
+) -> PageObject:
+    text_x, text_y, font_size = layout
+    scale = font_size / 1000
+    commands = [f"q {scale:.8f} 0 0 {scale:.8f} {text_x:.8f} {text_y:.8f} cm"]
+    for character in label:
+        if character != " ":
+            commands.append(f"/FormXob.g{ord(character)} Do")
+        advance = stringWidth(character, _OVERLAY_FONT_NAME, 1000)
+        commands.append(f"1 0 0 1 {advance:.8f} 0 cm")
+    commands.append("Q")
+    content = DecodedStreamObject()
+    content.set_data("\n".join(commands).encode("ascii"))
+    page = PageObject.create_blank_page(width=width, height=height)
+    page[NameObject("/Resources")] = DictionaryObject({NameObject("/XObject"): glyphs})
+    page[NameObject("/Contents")] = content
+    return page
+
+
+def _isolate_page_for_merge(page: PageObject) -> None:
+    # pypdf mutates resource tables and replaces content objects in-place.
+    # Detach those containers, retaining shared font and image payloads.
+    resources = DictionaryObject(page.get("/Resources", DictionaryObject()).get_object())
+    for key, reference in resources.items():
+        resource = reference.get_object()
+        if isinstance(resource, DictionaryObject):
+            resources[key] = DictionaryObject(resource)
+        elif isinstance(resource, ArrayObject):
+            resources[key] = ArrayObject(resource)
+    page[NameObject("/Resources")] = resources
+    contents = page.get_contents()
+    if contents is not None:
+        detached = DecodedStreamObject()
+        detached.set_data(contents.get_data())
+        del page["/Contents"]
+        page.replace_contents(detached.flate_encode())
 
 
 def _overlay_map(overlays: Iterable[Overlay]) -> dict[int, str]:
@@ -309,14 +383,10 @@ def annotate_pdf(
                 return
 
             _ensure_overlay_font()
+            glyphs = _overlay_glyphs(labels.values())
             writer = PdfWriter()
             for page_number, page in enumerate(reader.pages, start=1):
                 label = labels.get(page_number)
-                if label:
-                    # Pages may share resources. Reset cloning around the merge
-                    # so a label cannot leak into another page's content.
-                    writer.reset_translation(reader)
-
                 writer.add_page(page)
                 if label:
                     writer_page = writer.pages[-1]
@@ -324,6 +394,7 @@ def annotate_pdf(
                         raise OverlayError(
                             "Rotated PDF pages with interactive annotations are not supported"
                         )
+                    _isolate_page_for_merge(writer_page)
                     layout = _prepare_overlay_layout(writer_page, label)
                     cropbox = writer_page.cropbox
                     _check_overlay_space(writer_page, label, layout)
@@ -333,13 +404,19 @@ def annotate_pdf(
                             float(cropbox.height),
                             label,
                             layout,
+                            glyphs,
                         ),
                         float(cropbox.left),
                         float(cropbox.bottom),
                     )
                     if writer_page.rotation:
                         writer_page.transfer_rotation_to_content()
-                    writer.reset_translation(reader)
+                    writer_page.compress_content_streams()
+
+            # Resolve duplicates first. Pruning in the same pass can discard the
+            # surviving target while references still point at its duplicates.
+            writer.compress_identical_objects(remove_unreferenced=False)
+            writer.compress_identical_objects(remove_duplicates=False)
 
             with (
                 atomic_output_path(destination_path, suffix=".pdf") as temporary_path,

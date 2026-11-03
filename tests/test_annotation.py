@@ -5,7 +5,8 @@ import stat
 from pathlib import Path
 
 import pytest
-from pypdf import PageObject, PdfReader, PdfWriter
+from pdf_assertions import drawn_label, render_page
+from pypdf import PdfReader, PdfWriter
 from pypdf.generic import ArrayObject, NameObject
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfbase.pdfmetrics import stringWidth
@@ -31,40 +32,39 @@ def test_annotate_pdf_adds_sanitized_label_and_uses_owner_only_mode(tmp_path: Pa
 
     reader = PdfReader(output)
     assert len(reader.pages) == 2
-    assert "Заказ № 6904" in (reader.pages[0].extract_text() or "")
+    assert "Заказ № 6904" in drawn_label(reader.pages[0])
     if os.name == "posix":
         assert stat.S_IMODE(output.stat().st_mode) == 0o600
 
 
-def test_annotate_pdf_isolates_cloned_resources_around_merge(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("fixture", ["synthetic-form7.pdf", "synthetic-waybill.pdf"])
+@pytest.mark.parametrize("content_array", [False, True])
+@pytest.mark.parametrize("rotation", [0, 90])
+def test_annotate_pdf_isolates_content_and_shares_resources(
+    tmp_path: Path, fixture: str, content_array: bool, rotation: int
 ) -> None:
-    events: list[str] = []
-    original_merge_translated_page = PageObject.merge_translated_page
-    original_reset_translation = PdfWriter.reset_translation
+    original = PdfReader(FIXTURE.with_name(fixture)).pages[0]
+    if content_array:
+        original[NameObject("/Contents")] = ArrayObject([original.raw_get("/Contents")])
+    original.rotate(rotation)
+    writer = PdfWriter()
+    for _ in range(3):
+        writer.add_page(original)
+    source = tmp_path / "shared.pdf"
+    writer.write(source)
+    original_bytes = source.read_bytes()
+    output = tmp_path / "annotated.pdf"
 
-    def record_merge_translated(
-        page: PageObject,
-        overlay: PageObject,
-        tx: float,
-        ty: float,
-        *args: object,
-        **kwargs: object,
-    ) -> None:
-        events.append("merge")
-        original_merge_translated_page(page, overlay, tx, ty, *args, **kwargs)
+    annotate_pdf(source, output, [Overlay(1, "001234"), Overlay(3, "567890")])
 
-    def record_reset(writer: PdfWriter, reader: PdfReader) -> None:
-        events.append("reset")
-        original_reset_translation(writer, reader)
-
-    monkeypatch.setattr(PageObject, "merge_translated_page", record_merge_translated)
-    monkeypatch.setattr(PdfWriter, "reset_translation", record_reset)
-
-    annotate_pdf(FIXTURE, tmp_path / "annotated.pdf", [Overlay(1, "1234")])
-
-    assert events == ["reset", "merge", "reset"]
+    pages = PdfReader(output).pages
+    assert [drawn_label(page) for page in pages] == ["Заказ № 001234", "", "Заказ № 567890"]
+    assert render_page(source, 1) == render_page(output, 1)
+    assert source.read_bytes() == original_bytes
+    assert parse_pdf(source) == parse_pdf(output)
+    fonts = [page["/Resources"]["/Font"] for page in pages]
+    for name in fonts[0]:
+        assert fonts[0].raw_get(name) == fonts[1].raw_get(name) == fonts[2].raw_get(name)
 
 
 def test_overlay_layout_fits_maximum_label_within_a4() -> None:
@@ -125,7 +125,7 @@ def test_annotate_pdf_preserves_parsed_shipping_fields(tmp_path: Path) -> None:
     assert [page.recipient_phone for page in after.pages] == [
         page.recipient_phone for page in before.pages
     ]
-    assert "Заказ № 6904" in (PdfReader(output).pages[0].extract_text() or "")
+    assert "Заказ № 6904" in drawn_label(PdfReader(output).pages[0])
 
 
 def test_annotate_pdf_uses_cropbox_coordinates(tmp_path: Path) -> None:
@@ -141,7 +141,7 @@ def test_annotate_pdf_uses_cropbox_coordinates(tmp_path: Path) -> None:
     annotate_pdf(source, output, [Overlay(page_number=1, order_label="987")])
 
     output_page = PdfReader(output).pages[0]
-    assert "Заказ № 987" in (output_page.extract_text() or "")
+    assert "Заказ № 987" in drawn_label(output_page)
     assert tuple(float(value) for value in output_page.cropbox) == (50.0, 40.0, 350.0, 260.0)
 
 
@@ -161,7 +161,7 @@ def test_annotate_pdf_transfers_page_rotation_before_merge(
 
     output_page = PdfReader(output).pages[0]
     assert output_page.rotation == 0
-    assert f"Заказ № {rotation}" in (output_page.extract_text() or "")
+    assert f"Заказ № {rotation}" in drawn_label(output_page)
 
 
 def test_annotate_pdf_rejects_rotated_page_with_interactive_annotations(
@@ -183,7 +183,7 @@ def test_annotate_pdf_ignores_empty_sanitized_label(tmp_path: Path) -> None:
 
     annotate_pdf(FIXTURE, output, [Overlay(page_number=1, order_label="  ")])
 
-    assert "Только текст" not in (PdfReader(output).pages[0].extract_text() or "")
+    assert drawn_label(PdfReader(output).pages[0]) == ""
 
 
 @pytest.mark.parametrize(
@@ -201,7 +201,7 @@ def test_annotate_pdf_ignores_empty_label_before_duplicate_check(
 
     annotate_pdf(FIXTURE, output, overlays)
 
-    assert "Заказ № 1234" in (PdfReader(output).pages[0].extract_text() or "")
+    assert "Заказ № 1234" in drawn_label(PdfReader(output).pages[0])
 
 
 def test_annotate_pdf_rejects_duplicate_pages(tmp_path: Path) -> None:
