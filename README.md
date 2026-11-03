@@ -104,7 +104,9 @@ Pass the order number as an ASCII digit string; leading zeros are preserved. An 
 Five- and six-digit order numbers are supported, including leading zeros. Numbers longer
 than 64 digits are rejected. Empty strings are ignored. No additional barcode is generated.
 
-The library embeds Noto Sans Bold and prints `Заказ № <number>`. Compact waybills use the
+The library draws `Заказ № <number>` as shared vector outlines of Noto Sans Bold, without
+embedding a label font. Labels remain sharp at any zoom level but are not extractable text.
+Source fonts and images are reused across pages. Compact waybills use the
 header to the right of the logo, even on an A4 sheet; Form 7 uses the free area beside the
 title. Header anchors adapt to scaling and CropBox offsets. Labels shrink from 12 pt down
 to 8 pt if needed, and remain at least 7 mm above a detected recipient caption. Pages without

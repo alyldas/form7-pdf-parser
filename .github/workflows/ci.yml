@@ -84,6 +84,7 @@ jobs:
       - run: python -m pip install --upgrade pip
       - run: >-
           python -m pip install
+          "fonttools==4.68.0"
           "pypdf==6.21.4"
           "reportlab==5.1.0"
           "pypdfium2==5.14.0"
