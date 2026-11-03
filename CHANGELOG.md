@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 The format follows Keep a Changelog 1.1.0, and the project uses Semantic Versioning 2.0.0.
 
+## [0.3.1](https://github.com/alyldas/form7-pdf-parser/compare/v0.3.0...v0.3.1) (2026-11-03)
+
+
+### Bug Fixes
+
+* **pdf:** reduced annotation memory and PDF size ([#17](https://github.com/alyldas/form7-pdf-parser/issues/17)) ([c37d8ca](https://github.com/alyldas/form7-pdf-parser/commit/c37d8caedca429ee8b0b54e5e8b5f4c674fe1a92))
+
 ## [0.3.0](https://github.com/alyldas/form7-pdf-parser/compare/v0.2.2...v0.3.0) (2026-11-03)
 
 
