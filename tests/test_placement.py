@@ -9,11 +9,24 @@ import pytest
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import ArrayObject, DictionaryObject, FloatObject, NameObject, RectangleObject
 from reportlab.lib.pagesizes import A4, A6
+from reportlab.pdfbase.pdfmetrics import registerFont
+from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen.canvas import Canvas
 
 from form7_pdf_parser import Overlay, OverlayError, PdfReadError, annotate_pdf, parse_pdf
 
 FIXTURES = Path(__file__).parent / "fixtures"
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _placement_font() -> None:
+    # Fixture generation must not depend on the package registering its own font.
+    registerFont(
+        TTFont(
+            "PlacementFixtureFont",
+            str(FIXTURES.parent.parent / "src/form7_pdf_parser/fonts/NotoSans-Bold.ttf"),
+        )
+    )
 
 
 def _pdf(
@@ -26,9 +39,9 @@ def _pdf(
 ) -> Path:
     path = tmp_path / "source.pdf"
     c = Canvas(str(path), pagesize=A4, invariant=1)
-    c.setFont("Form7NotoSansBold", 21.5)
+    c.setFont("PlacementFixtureFont", 21.5)
     c.drawString(239, 815.89, "ПОСЫЛКА")
-    c.setFont("Form7NotoSansBold", 10)
+    c.setFont("PlacementFixtureFont", 10)
     c.drawString(307, recipient_y, recipient_caption)
     c.drawString(307, recipient_y - 20, "Получатель Тестовый")
     if kind == "multiple":
