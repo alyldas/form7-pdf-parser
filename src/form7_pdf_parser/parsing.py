@@ -12,7 +12,7 @@ _TRACKING_PATTERN = re.compile(
 )
 _AMOUNT_PATTERN = re.compile(r"\b(?:руб|коп)\b", flags=re.IGNORECASE)
 _PHONE_LINE_PATTERN = re.compile(
-    r"(?:(?:тел(?:ефон)?|phone)\.?\s*:?\s*)?\+?[0-9()\-\s]+",
+    r"(?:(?P<label>(?:тел(?:ефон)?|phone)\.?\s*:?)\s*)?(?P<number>\+?[0-9()\-\s]+)",
     flags=re.IGNORECASE,
 )
 _TRACKING_FRAGMENT_PATTERN = re.compile(r"[0-9][0-9\s-]*")
@@ -50,7 +50,7 @@ def _waybill_sections(lines: list[str]) -> tuple[list[str], list[str], bool] | N
     recipient = expanded[recipient_index + 1 :]
     # Legacy forms can also contain sender/recipient captions. Require new-layout
     # evidence before giving those captions priority over the legacy payment block.
-    legacy_payment = any(_TRACKING_MARKER.casefold() in line.casefold() for line in recipient)
+    legacy_payment = _TRACKING_MARKER.casefold() in " ".join(recipient).casefold()
     if legacy_payment and not _WAYBILL_TRACKING_PATTERN.search("\n".join(header)):
         return None
     multiple = markers.count("от кого") > 1 or markers.count("кому") > 1
@@ -164,39 +164,56 @@ def _waybill_content(lines: list[str]) -> list[str]:
     return content
 
 
-def _waybill_phones(lines: list[str]) -> tuple[list[str], set[str], int | None]:
-    remaining: list[str] = []
-    phones: set[str] = set()
-    phone_boundary = None
+def _join_waybill_phones(lines: list[str]) -> list[str]:
+    joined: list[str] = []
     index = 0
     while index < len(lines):
         line = lines[index].translate(_PHONE_DASHES)
         phone = _parse_phone_line(line)
         consumed = 1
         # Join only numeric phone fragments; never consume an address line.
-        if phone is None and re.match(r"^(?:\+7|8)\b", line):
+        match = _PHONE_LINE_PATTERN.fullmatch(line)
+        if (
+            phone is None
+            and match is not None
+            and (match["label"] is not None or re.match(r"^(?:\+7|8)\b", match["number"]))
+        ):
+            line = match["number"]
             for end in range(index + 1, min(index + 3, len(lines))):
                 fragment = lines[end].translate(_PHONE_DASHES)
-                if _PHONE_LINE_PATTERN.fullmatch(fragment) is None:
+                continuation = _PHONE_LINE_PATTERN.fullmatch(fragment)
+                if continuation is None or continuation["label"] is not None:
                     break
                 line += " " + fragment
                 if (phone := _parse_phone_line(line)) is not None:
                     consumed = end - index + 1
                     break
-        if phone is None:
-            remaining.append(lines[index])
-        else:
+        joined.append(lines[index] if phone is None else phone)
+        index += consumed
+    return joined
+
+
+def _waybill_phones(lines: list[str]) -> tuple[list[str], set[str], int | None]:
+    remaining: list[str] = []
+    phones: set[str] = set()
+    phone_boundary = None
+    # Join before detecting the routing postcode: a six-digit phone fragment
+    # must not terminate the recipient block and hide a conflicting postcode.
+    for line in _waybill_content(_join_waybill_phones(lines)):
+        phone = _parse_phone_line(line.translate(_PHONE_DASHES))
+        if phone is not None:
             phones.add(phone)
             if phone_boundary is None:
                 phone_boundary = len(remaining)
-        index += consumed
+        else:
+            remaining.append(line)
     return remaining, phones, phone_boundary
 
 
 def _parse_waybill_recipient(
     lines: list[str],
 ) -> tuple[str | None, str | None, str | None, tuple[PageValidationIssue, ...]]:
-    remaining, phones, phone_boundary = _waybill_phones(_waybill_content(lines))
+    remaining, phones, phone_boundary = _waybill_phones(lines)
     address_index = next(
         (index for index, line in enumerate(remaining) if re.search(r"[0-9]", line)),
         len(remaining),

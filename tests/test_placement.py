@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from contextlib import closing
 from io import BytesIO
 from pathlib import Path
 
+import pypdfium2 as pdfium
 import pytest
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import ArrayObject, DictionaryObject, FloatObject, NameObject, RectangleObject
@@ -190,3 +192,77 @@ def test_five_and_six_digit_orders_use_small_font(tmp_path: Path, number: str, k
     assert _label_position(output)[2] == 12
     assert f"Заказ № {number}" in PdfReader(output).pages[0].extract_text()
     assert parse_pdf(output) == parse_pdf(source)
+
+
+@pytest.mark.parametrize("rotation", [0, 90, 180, 270])
+@pytest.mark.parametrize("cropped", [False, True])
+def test_fallback_label_is_upright_at_visible_top_right(
+    tmp_path: Path, rotation: int, cropped: bool
+) -> None:
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=400, height=300)
+    if cropped:
+        page.cropbox = RectangleObject((50, 40, 350, 260))
+    page.rotate(rotation)
+    source = tmp_path / "rotated.pdf"
+    writer.write(source)
+    output = tmp_path / "labelled.pdf"
+
+    annotate_pdf(source, output, [Overlay(1, "001234")])
+
+    result = PdfReader(output).pages[0]
+    assert result.rotation == 0
+    directions = []
+
+    def visit(text, cm, tm, font, size):
+        if "Заказ №" in text:
+            directions.append((tm[0] * cm[0] + tm[1] * cm[2], tm[0] * cm[1] + tm[1] * cm[3]))
+
+    result.extract_text(visitor_text=visit)
+    assert directions == [pytest.approx((1, 0))]
+    with (
+        pdfium.PdfDocument(str(output)) as document,
+        closing(document[0]) as rendered_page,
+        closing(rendered_page.render(grayscale=True)) as bitmap,
+    ):
+        ink = [
+            (x, y)
+            for y in range(bitmap.height)
+            for x in range(bitmap.width)
+            if bitmap.buffer[y * bitmap.stride + x] < 250
+        ]
+        assert ink
+        assert min(x for x, _ in ink) > 35
+        assert max(x for x, _ in ink) == pytest.approx(bitmap.width - 40, abs=3)
+        assert 5 < min(y for _, y in ink) < max(y for _, y in ink) < 40
+
+
+@pytest.mark.parametrize("rotation", [0, 90, 180, 270])
+@pytest.mark.parametrize("cropped", [False, True])
+def test_rotated_fallback_checks_visible_corner_for_obstacles(
+    tmp_path: Path, rotation: int, cropped: bool
+) -> None:
+    left, bottom, right, top = (50, 40, 350, 260) if cropped else (0, 0, 400, 300)
+    points = {
+        0: (right - 60, top - 25),
+        90: (left + 25, top - 60),
+        180: (left + 60, bottom + 25),
+        270: (right - 25, bottom + 60),
+    }
+    drawing = BytesIO()
+    canvas = Canvas(drawing, pagesize=(400, 300), invariant=1)
+    canvas.circle(*points[rotation], 2, fill=1)
+    canvas.save()
+    writer = PdfWriter()
+    page = writer.add_page(PdfReader(drawing).pages[0])
+    page.cropbox = RectangleObject((left, bottom, right, top))
+    page.rotate(rotation)
+    source = tmp_path / "occupied.pdf"
+    writer.write(source)
+    output = tmp_path / "labelled.pdf"
+    output.write_bytes(b"existing output")
+
+    with pytest.raises(OverlayError, match="occupied"):
+        annotate_pdf(source, output, [Overlay(1, "001234")])
+
+    assert output.read_bytes() == b"existing output"

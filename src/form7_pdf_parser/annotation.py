@@ -67,7 +67,8 @@ def _overlay_layout(width: float, height: float, label: str) -> tuple[float, flo
     return text_x, text_y, font_size
 
 
-def _page_overlay_layout(page: PageObject, label: str) -> tuple[float, float, float]:
+def _prepare_overlay_layout(page: PageObject, label: str) -> tuple[float, float, float]:
+    """Normalize fallback page rotation and calculate coordinates for the prepared page."""
     if float(page.get("/UserUnit", 1)) != 1:
         raise OverlayError("Custom PDF UserUnit is not supported for order label placement")
     anchors: list[tuple[str, float, float, float]] = []
@@ -83,11 +84,18 @@ def _page_overlay_layout(page: PageObject, label: str) -> tuple[float, float, fl
             anchors.append((title, x, y, height))
 
     page.extract_text(visitor_text=visit)
-    crop = page.cropbox
     headers = [anchor for anchor in anchors if anchor[0] != "кому"]
     recipients = [anchor for anchor in anchors if anchor[0] == "кому"]
     if len(headers) > 1 or len(recipients) > 1:
         raise OverlayError("Cannot place an order label on a page with multiple shipping forms")
+    if not headers and page.rotation:
+        # Generic labels stay upright in displayed coordinates. Known shipping
+        # headers retain their orientation and rotate together with the form.
+        page.transfer_rotation_to_content()
+        anchors.clear()
+        page.extract_text(visitor_text=visit)
+        recipients = [anchor for anchor in anchors if anchor[0] == "кому"]
+    crop = page.cropbox
     if not headers:
         layout = _overlay_layout(float(crop.width), float(crop.height), label)
     else:
@@ -267,8 +275,8 @@ def annotate_pdf(
                         raise OverlayError(
                             "Rotated PDF pages with interactive annotations are not supported"
                         )
+                    layout = _prepare_overlay_layout(writer_page, label)
                     cropbox = writer_page.cropbox
-                    layout = _page_overlay_layout(writer_page, label)
                     _check_overlay_space(writer_page, label, layout)
                     writer_page.merge_translated_page(
                         _overlay_page(

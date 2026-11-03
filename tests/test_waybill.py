@@ -76,9 +76,13 @@ def test_waybill_accepts_repeated_identical_tracking_number() -> None:
     assert parse_tracking_number("00000000000000\n" + WAYBILL_TEXT) == "00000000000000"
 
 
-def test_waybill_has_priority_over_legacy_payment_marker() -> None:
+@pytest.mark.parametrize(
+    "caption",
+    ["Оплачивается при вручении", "Оплачивается\nпри вручении", "Оплачивается\nпри\nвручении"],
+)
+def test_waybill_has_priority_over_legacy_payment_marker(caption: str) -> None:
     text = WAYBILL_TEXT.replace(
-        "Объявленная ценность", "Оплачивается при вручении\n111111 11 11111 1\n100 руб 00 коп"
+        "Объявленная ценность", f"{caption}\n111111 11 11111 1\n100 руб 00 коп"
     )
     page = parse_page(text, 1)
 
@@ -201,6 +205,43 @@ def test_waybill_recovers_split_and_unicode_phone(phone: str) -> None:
     assert page.as_dict() == parse_page(WAYBILL_TEXT, 1).as_dict()
 
 
+@pytest.mark.parametrize("prefix", ["Тел.: ", "телефон: ", "PHONE "])
+@pytest.mark.parametrize(
+    "phone",
+    ["+7 000\n000 0000", "8 (000)\n000\n00‑00", "+7000\n0000000", "000\n0000000"],
+)
+@pytest.mark.parametrize("after_address", [False, True])
+def test_waybill_recovers_labelled_wrapped_phone(
+    prefix: str, phone: str, after_address: bool
+) -> None:
+    text = WAYBILL_TEXT.replace("+7 000 000 0000\n", "")
+    insertion = "д. 0\n" if after_address else "Получатель Тестовый\n"
+    text = text.replace(insertion, insertion + prefix + phone + "\n")
+
+    assert parse_page(text, 1) == parse_page(WAYBILL_TEXT, 1)
+
+
+@pytest.mark.parametrize("phone", ["Тел.: +7 000", "PHONE +1 000\n000 0000"])
+def test_invalid_labelled_phone_preserves_address_and_postcode(phone: str) -> None:
+    page = parse_page(WAYBILL_TEXT.replace("+7 000 000 0000", phone), 1)
+
+    assert page.recipient_phone is None
+    assert page.recipient_postcode == "000000"
+    assert "г. Примерск, ул. Макетная, д. 0" in (page.recipient_address or "")
+    assert PageValidationIssue.MISSING_RECIPIENT_PHONE in page.validation_issues
+
+
+@pytest.mark.parametrize("prefix", ["", "Тел.: "])
+def test_wrapped_phone_after_address_does_not_hide_conflicting_postcode(prefix: str) -> None:
+    text = WAYBILL_TEXT.replace("+7 000 000 0000\n", "")
+    text = text.rsplit("000000\n", 1)[0] + prefix + "+7 0000\n000000\n000002\n"
+    page = parse_page(text, 1)
+
+    assert page.recipient_phone == "0000000000"
+    assert page.recipient_address == "000000, Россия, г. Примерск, ул. Макетная, д. 0 000002"
+    assert page.validation_issues == (PageValidationIssue.CONFLICTING_POSTCODES,)
+
+
 def test_waybill_incomplete_phone_does_not_consume_address() -> None:
     page = parse_page(WAYBILL_TEXT.replace("+7 000 000 0000", "+7 000"), 1)
 
@@ -289,7 +330,17 @@ def test_waybill_rejects_multiple_shipments_per_page() -> None:
     assert parse_recipient_name_address_phone(normalize_lines(text)) == (None, None, None)
 
 
-def test_legacy_form_with_section_captions_keeps_previous_behavior() -> None:
+@pytest.mark.parametrize(
+    "caption",
+    [
+        "Оплачивается при вручении",
+        "Оплачивается\nпри вручении",
+        "Оплачивается при\nвручении",
+        "ОПЛАЧИВАЕТСЯ\nпри\nвручении",
+        "Оплачивается\u00a0при\tвручении",
+    ],
+)
+def test_legacy_form_with_section_captions_keeps_previous_behavior(caption: str) -> None:
     text = """Synthetic legacy Form 7
 ОТ КОГО
 Отправитель Тестовый
@@ -301,7 +352,7 @@ def test_legacy_form_with_section_captions_keeps_previous_behavior() -> None:
 000000, г. Примерск, д. 0
 +7 000 000 0000
 """
-    page = parse_page(text, 1)
+    page = parse_page(text.replace("Оплачивается при вручении", caption), 1)
 
     assert page.is_valid is True
     assert page.validation_issues == ()
