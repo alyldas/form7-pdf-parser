@@ -26,23 +26,8 @@ and legacy Form 7 PDFs and adding order labels to their pages.
 - Scanned documents require OCR before they can be parsed; OCR is not included.
 - Parsing is heuristic because PDF text layout can vary between generators.
 - Only 14-digit tracking numbers are accepted.
-- Waybill tracking must appear before `ОТ КОГО`, as 14 contiguous digits or groups of
-  6, 2, 5, and 1 digits. Conflicting tracking numbers are rejected.
-- Waybill recipients are read under `КОМУ`, including wrapped names and phone numbers,
-  inline section captions, Unicode phone dashes, and phones before or after the address.
-  An initial standalone postcode is retained; a postcode after the address ends the block.
-  Explicit `+7` or separated `7`/`8` phone prefixes require eleven digits in total.
-  Numeric phone fragments may span multiple lines without a fixed three-line limit.
-  After the address, six bare digits are a routing postcode; use `+7` or a phone label
-  to distinguish a wrapped phone that would otherwise start with six bare digits.
-  Trailing `Заказ № ...` and older `Order #...` labels are excluded when the routing postcode is absent.
-  Names and addresses are separated by phone/postcode and numeric address boundaries,
-  not a dictionary of locality names. An unresolved wrapped-name/address boundary is
-  reported as `ambiguous_recipient` instead of guessed.
-  Multiple name/locality lines before a numeric street or postcode require a phone
-  delimiter; otherwise neither the name nor address is returned as a guessed value.
-  Repeated routing postcodes are removed only when they already appear in the address;
-  different postcodes are preserved without choosing which one is correct.
+- Ambiguous recipient fields are reported instead of guessed. See the
+  [format reference](docs/formats.md) for tracking, phone, address and postcode rules.
 - Rotated pages containing interactive annotations must be flattened before adding labels.
 
 ## Installation
@@ -53,16 +38,7 @@ Download the wheel from the [latest release](../../releases/latest), then instal
 python -m pip install ./form7_pdf_parser-*.whl
 ```
 
-For development:
-
-```bash
-gh repo clone alyldas/form7-pdf-parser
-cd form7-pdf-parser
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -e ".[dev]"
-```
+For development setup and checks, see [CONTRIBUTING.md](CONTRIBUTING.md#development-workflow).
 
 ## CLI
 
@@ -104,19 +80,11 @@ Pass the order number as an ASCII digit string; leading zeros are preserved. An 
 Five- and six-digit order numbers are supported, including leading zeros. Numbers longer
 than 64 digits are rejected. Empty strings are ignored. No additional barcode is generated.
 
-The library draws `Заказ № <number>` as shared vector outlines of Noto Sans Bold, without
-embedding a label font. Labels remain sharp at any zoom level but are not extractable text.
-Source fonts and images are reused across pages. Compact waybills use the
-header to the right of the logo, even on an A4 sheet; Form 7 uses the free area beside the
-title. Header anchors adapt to scaling and CropBox offsets. Labels shrink from 12 pt down
-to 8 pt if needed, and remain at least 7 mm above a detected recipient caption. Pages without
-a recognized header use the previous top-right placement, subject to the same space check.
-
-Before writing, PDFium renders the proposed area at 216 dpi with a 2 pt safety margin.
-Any visible content in that area causes `OverlayError`; the library never erases an existing
-number or searches for an arbitrary alternative position. Labels outside the visible page,
-unfittable labels, and multiple forms on one page are rejected. On failure, an existing output
-file remains unchanged. These checks verify placement, not postal acceptance of every PDF.
+Labels use shared vector outlines of Noto Sans Bold in a verified free header area, without
+embedding a label font. They remain sharp at any zoom level but are not extractable text.
+Source fonts and images are reused across pages. Occupied areas, labels that do not fit, and
+multiple forms on one page are rejected; an existing output remains unchanged.
+See [label placement](docs/formats.md#label-placement) for geometry and safety checks.
 
 Successful commands return `0`, processing failures return `1`, and invalid command-line
 arguments return `2`. Errors are written to standard error.
@@ -176,11 +144,6 @@ The package also exports the lower-level `parse_page`, `parse_tracking_number`, 
 `parse_recipient_name_address_phone` helpers for advanced integrations. These functions are
 best-effort text heuristics; prefer `parse_pdf` when processing complete documents.
 
-Formats are detected per page, so one PDF can contain both layouts. Explicit waybill
-sections take priority when the header contains tracking or no legacy recipient payment
-block is present. Sender details are never used as a fallback for an empty `КОМУ` section.
-The JSON fields are the same for both formats.
-
 ## Privacy and security
 
 Shipping documents can contain names, addresses, phone numbers, payment amounts, and active
@@ -190,20 +153,6 @@ minimal synthetic reproduction instead.
 The library uses defensive defaults, but it is not a malware scanner or a hardened document
 sandbox. Process untrusted PDFs in an isolated worker with operating-system resource limits.
 See [SECURITY.md](SECURITY.md) for vulnerability reporting.
-
-## Development
-
-```bash
-ruff format --check .
-ruff check .
-mypy
-pytest
-python -m build
-twine check dist/*
-```
-
-All committed PDF fixtures are generated from clearly fictional data. See
-[tests/fixtures/README.md](tests/fixtures/README.md).
 
 ## Contributing
 

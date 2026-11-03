@@ -4,11 +4,12 @@ import os
 import re
 import shutil
 from collections.abc import Iterable
+from contextlib import closing
 from io import BytesIO
 from math import hypot, isfinite
 from pathlib import Path
 from threading import Lock
-from typing import BinaryIO, cast
+from typing import BinaryIO, NamedTuple, cast
 
 import pypdfium2 as pdfium  # type: ignore[import-untyped]
 from fontTools.pens.reportLabPen import ReportLabPen  # type: ignore[import-untyped]
@@ -24,7 +25,7 @@ from pypdf.generic import (
     NullObject,
     NumberObject,
 )
-from reportlab.pdfbase.pdfmetrics import registerFont, stringWidth
+from reportlab.pdfbase.pdfmetrics import getRegisteredFontNames, registerFont, stringWidth
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen.canvas import Canvas
 from reportlab.pdfgen.pathobject import PDFPathObject
@@ -43,10 +44,36 @@ _OVERLAY_HORIZONTAL_MARGIN = 40.0
 _OVERLAY_TOP_MARGIN = 16.0
 _COPY_CHUNK_SIZE = 1024 * 1024
 _RENDER_LOCK = Lock()
+_FONT_LOCK = Lock()
 _ADDRESS_GAP = 7 * 72 / 25.4
 _INK_PADDING = 2.0
 
-registerFont(TTFont(_OVERLAY_FONT_NAME, str(Path(__file__).parent / "fonts/NotoSans-Bold.ttf")))
+
+class _HeaderGeometry(NamedTuple):
+    """Reference header measurements in PDF points (1/72 inch)."""
+
+    title_size: float
+    left_offset: float
+    baseline_offset: float
+    available_width: float
+    align_right: bool
+
+
+# Preserve the established label positions relative to the title's text origin.
+# The rendered title height scales these reference measurements with the form;
+# CropBox offsets are subtracted only when converting to overlay coordinates.
+_LEGACY_HEADER = _HeaderGeometry(21.5, 175.0, -0.89, 130.0, align_right=False)
+_WAYBILL_HEADER = _HeaderGeometry(9.0, 38.54, 24.58, 150.5, align_right=True)
+
+
+def _ensure_overlay_font() -> None:
+    # Registration changes ReportLab's process-wide registry. Serialize the first
+    # load, and leave parsing and byte-identical copies independent of the font.
+    with _FONT_LOCK:
+        if _OVERLAY_FONT_NAME not in getRegisteredFontNames():
+            registerFont(
+                TTFont(_OVERLAY_FONT_NAME, str(Path(__file__).parent / "fonts/NotoSans-Bold.ttf"))
+            )
 
 
 def normalize_overlay_label(label: str) -> str:
@@ -115,23 +142,23 @@ def _prepare_overlay_layout(page: PageObject, label: str) -> tuple[float, float,
         layout = _overlay_layout(float(crop.width), float(crop.height), label)
     else:
         title, x, y, height = headers[0]
-        compact = title != "посылка"
-        scale = height / (9.0 if compact else 21.5)
+        geometry = _LEGACY_HEADER if title == "посылка" else _WAYBILL_HEADER
+        scale = height / geometry.title_size
         if not isfinite(scale) or scale <= 0:
             raise OverlayError("Invalid shipping header geometry")
-        left = x + (38.54 if compact else 175.0) * scale - float(crop.left)
-        available = (150.5 if compact else 130.0) * scale
-        baseline = y + (24.58 if compact else -0.89) * scale - float(crop.bottom)
+        left = x + geometry.left_offset * scale - float(crop.left)
+        available = geometry.available_width * scale
+        baseline = y + geometry.baseline_offset * scale - float(crop.bottom)
         font_size = min(
             _OVERLAY_MAX_FONT_SIZE * scale, available / stringWidth(label, _OVERLAY_FONT_NAME, 1)
         )
         if font_size < _OVERLAY_MIN_FONT_SIZE:
             raise OverlayError("Order label does not fit within the shipping header")
-        if compact:
+        if geometry.align_right:
             left += available - stringWidth(label, _OVERLAY_FONT_NAME, font_size)
         layout = left, baseline, font_size
 
-    x, y, font_size = layout
+    _x, y, font_size = layout
     if recipients:
         _, _, recipient_y, recipient_height = recipients[0]
         if y - font_size * 0.3 + float(crop.bottom) < recipient_y + recipient_height + _ADDRESS_GAP:
@@ -192,15 +219,14 @@ def _check_overlay_space(page: PageObject, label: str, layout: tuple[float, floa
         try:
             with pdfium.PdfDocument(stream.getvalue()) as document:
                 document.init_forms()
-                rendered_page = document[0]
-                try:
+                with closing(document[0]) as rendered_page:
                     bitmap = rendered_page.render(
                         scale=3,
                         crop=(left, bottom, width - right, height - top),
                         grayscale=True,
                         draw_annots=True,
                     )
-                    try:
+                    with closing(bitmap):
                         occupied = any(
                             value < 255
                             for row in range(bitmap.height)
@@ -208,10 +234,6 @@ def _check_overlay_space(page: PageObject, label: str, layout: tuple[float, floa
                                 row * bitmap.stride : row * bitmap.stride + bitmap.width
                             ]
                         )
-                    finally:
-                        bitmap.close()
-                finally:
-                    rendered_page.close()
         except pdfium.PdfiumError as error:
             raise OverlayError("Unable to verify free space for the order label") from error
     if occupied:
@@ -324,8 +346,6 @@ def _copy_validated_source(source: BinaryIO, destination: Path) -> None:
         temporary_path.open("wb") as handle,
     ):
         shutil.copyfileobj(source, handle, length=_COPY_CHUNK_SIZE)
-        handle.flush()
-        os.fsync(handle.fileno())
 
 
 def annotate_pdf(
@@ -362,6 +382,7 @@ def annotate_pdf(
                 _copy_validated_source(reader_source, destination_path)
                 return
 
+            _ensure_overlay_font()
             glyphs = _overlay_glyphs(labels.values())
             writer = PdfWriter()
             for page_number, page in enumerate(reader.pages, start=1):
@@ -402,7 +423,5 @@ def annotate_pdf(
                 temporary_path.open("wb") as handle,
             ):
                 writer.write(handle)
-                handle.flush()
-                os.fsync(handle.fileno())
     except (OSError, PyPdfError) as error:
         raise PdfReadError("Unable to annotate the PDF") from error

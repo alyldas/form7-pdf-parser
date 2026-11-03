@@ -20,7 +20,7 @@ from form7_pdf_parser import (
     normalize_overlay_label,
     parse_pdf,
 )
-from form7_pdf_parser.annotation import _overlay_layout
+from form7_pdf_parser.annotation import _ensure_overlay_font, _overlay_layout
 
 FIXTURE = Path(__file__).parent / "fixtures" / "synthetic-form7.pdf"
 
@@ -68,6 +68,7 @@ def test_annotate_pdf_isolates_content_and_shares_resources(
 
 
 def test_overlay_layout_fits_maximum_label_within_a4() -> None:
+    _ensure_overlay_font()
     width, height = A4
     label = "1" * 64
 
@@ -80,6 +81,7 @@ def test_overlay_layout_fits_maximum_label_within_a4() -> None:
 
 
 def test_overlay_layout_rejects_page_too_narrow_for_label() -> None:
+    _ensure_overlay_font()
     with pytest.raises(OverlayError, match="fit"):
         _overlay_layout(100, 100, "A" * 64)
 
