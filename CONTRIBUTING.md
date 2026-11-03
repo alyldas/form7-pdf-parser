@@ -10,9 +10,16 @@ data and a newly generated minimal PDF.
 
 ## Development workflow
 
-1. Fork the repository and create a focused branch.
-2. Create a virtual environment with Python 3.11 or newer.
-3. Install development dependencies with `python -m pip install -e ".[dev]"`.
+1. Clone your fork, enter the repository directory and create a focused branch.
+2. Create a virtual environment with Python 3.11 or newer:
+
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate
+   python -m pip install -e ".[dev]"
+   ```
+
+3. Read the [format reference](docs/formats.md) before changing parsing or placement rules.
 4. Add or update synthetic tests.
 5. Run all checks listed below.
 6. Give the pull request a Conventional Commit title.
@@ -26,6 +33,24 @@ pytest
 python -m build
 twine check dist/*
 ```
+
+## Code map and compatibility
+
+- `parsing.py` contains text heuristics. `parse_page` selects the format once and
+  retains recipient diagnostics from the same extraction as its fields. Public
+  lower-level helpers use those same format-specific functions. Waybill phone spans
+  and the routing-postcode boundary are handled in one pass, without reparsing numbers.
+- `pdf.py` owns bounded input reading; `annotation.py` owns label placement and
+  occupied-area checks. The overlay font is registered only when labels are added.
+- `atomic.py` owns output publication: close the writer to flush its buffers,
+  sync the completed file, then replace.
+  An error before replacement must leave existing output intact.
+- `models.py` defines results and the stable JSON shape; `cli.py` handles arguments
+  and JSON input. Preserve public signatures, JSON fields and diagnostic ordering.
+
+Use fictional data for regression tests. See the
+[fixture guide](tests/fixtures/README.md) for generating synthetic PDFs. Placement
+changes must retain coverage for rotation, CropBox offsets and occupied areas.
 
 ## Commits and releases
 

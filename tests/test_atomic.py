@@ -6,7 +6,43 @@ from pathlib import Path
 
 import pytest
 
-from form7_pdf_parser.atomic import _sync_directory, atomic_write_json
+from form7_pdf_parser.atomic import _sync_directory, atomic_output_path, atomic_write_json
+
+
+@pytest.mark.parametrize("failure", ["write", "sync"])
+@pytest.mark.parametrize("encoding", [None, "utf-8"])
+def test_atomic_output_preserves_output_on_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str, encoding: str | None
+) -> None:
+    destination = tmp_path / "result"
+    destination.write_bytes(b"previous result")
+
+    def fail_sync(descriptor: int) -> None:
+        raise OSError("sync failed")
+
+    if failure == "sync":
+        monkeypatch.setattr(os, "fsync", fail_sync)
+
+    with (
+        pytest.raises(OSError, match="failed"),
+        atomic_output_path(destination, suffix=".tmp") as temporary_path,
+        temporary_path.open("wb" if encoding is None else "w", encoding=encoding) as handle,
+    ):
+        handle.write(b"partial result" if encoding is None else "partial result")
+        if failure == "write":
+            raise OSError("write failed")
+
+    assert destination.read_bytes() == b"previous result"
+    assert list(tmp_path.iterdir()) == [destination]
+
+
+def test_atomic_json_preserves_unicode_formatting(tmp_path: Path) -> None:
+    destination = tmp_path / "result.json"
+    atomic_write_json(destination, {"name": "Тестовый"})
+
+    assert destination.read_bytes() == (
+        '{\n  "name": "Тестовый"\n}\n'.replace("\n", os.linesep).encode("utf-8")
+    )
 
 
 @pytest.mark.skipif(os.name != "posix", reason="directory fsync is POSIX-only")
