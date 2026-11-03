@@ -21,6 +21,7 @@ from reportlab.pdfgen.canvas import Canvas
 from .atomic import atomic_output_path
 from .exceptions import OverlayError, PdfReadError
 from .models import Overlay
+from .parsing import _section_caption
 from .pdf import DEFAULT_MAX_FILE_SIZE, DEFAULT_MAX_PAGES, validated_pdf_reader
 
 MAX_OVERLAY_LABEL_LENGTH = 64
@@ -77,11 +78,13 @@ def _prepare_overlay_layout(page: PageObject, label: str) -> tuple[float, float,
         text: str, cm: list[float], tm: list[float], font: DictionaryObject | None, size: float
     ) -> None:
         title = " ".join(text.split()).casefold()
-        if title == "кому" or title == "посылка" or title.startswith("посылка "):
+        section = _section_caption(title)
+        recipient = section is not None and section[0] == "кому"
+        if recipient or title == "посылка" or title.startswith("посылка "):
             x = tm[4] * cm[0] + tm[5] * cm[2] + cm[4]
             y = tm[4] * cm[1] + tm[5] * cm[3] + cm[5]
             height = size * hypot(tm[2] * cm[0] + tm[3] * cm[2], tm[2] * cm[1] + tm[3] * cm[3])
-            anchors.append((title, x, y, height))
+            anchors.append(("кому" if recipient else title, x, y, height))
 
     page.extract_text(visitor_text=visit)
     headers = [anchor for anchor in anchors if anchor[0] != "кому"]

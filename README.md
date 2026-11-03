@@ -35,6 +35,8 @@ and legacy Form 7 PDFs and adding order labels to their pages.
   Names and addresses are separated by phone/postcode and numeric address boundaries,
   not a dictionary of locality names. An unresolved wrapped-name/address boundary is
   reported as `ambiguous_recipient` instead of guessed.
+  Multiple name/locality lines before a numeric street or postcode require a phone
+  delimiter; otherwise neither the name nor address is returned as a guessed value.
   Repeated routing postcodes are removed only when they already appear in the address;
   different postcodes are preserved without choosing which one is correct.
 - Rotated pages containing interactive annotations must be flattened before adding labels.

@@ -17,17 +17,22 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 
 def _pdf(
-    tmp_path: Path, *, kind: str = "legacy", obstacle: str = "", recipient_y: float = 700
+    tmp_path: Path,
+    *,
+    kind: str = "legacy",
+    obstacle: str = "",
+    recipient_y: float = 700,
+    recipient_caption: str = "Кому",
 ) -> Path:
     path = tmp_path / "source.pdf"
     c = Canvas(str(path), pagesize=A4, invariant=1)
     c.setFont("Form7NotoSansBold", 21.5)
     c.drawString(239, 815.89, "ПОСЫЛКА")
     c.setFont("Form7NotoSansBold", 10)
-    c.drawString(307, recipient_y, "Кому")
+    c.drawString(307, recipient_y, recipient_caption)
     c.drawString(307, recipient_y - 20, "Получатель Тестовый")
     if kind == "multiple":
-        c.drawString(50, 500, "Кому")
+        c.drawString(50, 500, recipient_caption)
     if obstacle == "text":
         c.drawString(420, 820, "9999")
     elif obstacle == "line":
@@ -266,3 +271,33 @@ def test_rotated_fallback_checks_visible_corner_for_obstacles(
         annotate_pdf(source, output, [Overlay(1, "001234")])
 
     assert output.read_bytes() == b"existing output"
+
+
+@pytest.mark.parametrize(
+    "caption",
+    ["Кому", "Кому:", "кому :", "КОМУ: Получатель Тестовый", "Кому Получатель Тестовый"],
+)
+@pytest.mark.parametrize("scenario", ["safe", "close", "multiple"])
+def test_recipient_caption_variants_share_placement_guards(
+    tmp_path: Path, caption: str, scenario: str
+) -> None:
+    source = _pdf(
+        tmp_path,
+        kind="multiple" if scenario == "multiple" else "legacy",
+        recipient_y=790 if scenario == "close" else 700,
+        recipient_caption=caption,
+    )
+    output = tmp_path / "out.pdf"
+    if scenario == "safe":
+        annotate_pdf(source, output, [Overlay(1, "001234")])
+        assert "Заказ № 001234" in PdfReader(output).pages[0].extract_text()
+    else:
+        output.write_bytes(b"existing output")
+        with pytest.raises(OverlayError, match="7 mm" if scenario == "close" else "multiple"):
+            annotate_pdf(source, output, [Overlay(1, "001234")])
+        assert output.read_bytes() == b"existing output"
+
+
+def test_unrelated_word_is_not_a_recipient_caption(tmp_path: Path) -> None:
+    source = _pdf(tmp_path, recipient_y=790, recipient_caption="Комус")
+    annotate_pdf(source, tmp_path / "out.pdf", [Overlay(1, "001234")])

@@ -261,9 +261,9 @@ def test_waybill_incomplete_phone_does_not_consume_address() -> None:
         ),
         (
             "Получатель\nТестовый\n000000, г. Примерск, д. 0\n000000",
-            "Получатель Тестовый",
             None,
-            "000000, г. Примерск, д. 0",
+            None,
+            None,
         ),
         (
             "Получатель Тестовый\n000000, г. Примерск, д. 0\n+7 000 000 0000\n000000",
@@ -276,7 +276,7 @@ def test_waybill_incomplete_phone_does_not_consume_address() -> None:
     ],
 )
 def test_waybill_field_boundaries(
-    block: str, name: str | None, phone: str | None, address: str
+    block: str, name: str | None, phone: str | None, address: str | None
 ) -> None:
     page = parse_page(WAYBILL_TEXT.split("КОМУ")[0] + "КОМУ\n" + block, 1)
 
@@ -286,6 +286,8 @@ def test_waybill_field_boundaries(
         address,
     )
     assert page.is_valid is (name is not None and phone is not None)
+    if block.startswith("Получатель\nТестовый"):
+        assert PageValidationIssue.AMBIGUOUS_RECIPIENT in page.validation_issues
 
 
 def test_waybill_accepts_inline_section_values() -> None:
@@ -426,3 +428,19 @@ def test_waybill_unlabelled_name_address_boundary_is_ambiguous() -> None:
     assert page.recipient_address is None
     assert PageValidationIssue.AMBIGUOUS_RECIPIENT in page.validation_issues
     assert page.is_valid is False
+
+
+@pytest.mark.parametrize("phone", ["", "+7 000 000 0000\n"])
+@pytest.mark.parametrize("locality", ["Москва", "аул Примерный", "Example locality"])
+@pytest.mark.parametrize("street", ["ул. Макетная, д. 1", "000000, ул. Макетная, д. 1"])
+def test_waybill_ambiguous_prefix_is_not_accepted_as_part_of_name(
+    phone: str, locality: str, street: str
+) -> None:
+    block = f"Получатель Тестовый\n{locality}\n{street}\n{phone}000000"
+    page = parse_page(WAYBILL_TEXT.split("КОМУ")[0] + "КОМУ\n" + block, 1)
+
+    assert page.is_valid is False
+    assert PageValidationIssue.AMBIGUOUS_RECIPIENT in page.validation_issues
+    assert page.recipient_name is None
+    assert page.recipient_address is None
+    assert page.recipient_phone == ("0000000000" if phone else None)

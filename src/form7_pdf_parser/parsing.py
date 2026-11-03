@@ -30,13 +30,18 @@ def normalize_lines(text: str) -> list[str]:
     return [line for raw in text.splitlines() if (line := re.sub(r"\s+", " ", raw).strip())]
 
 
+def _section_caption(text: str) -> tuple[str, str] | None:
+    match = _SECTION_PATTERN.fullmatch(" ".join(text.split()))
+    return (match[1].casefold(), match[2]) if match is not None else None
+
+
 def _waybill_sections(lines: list[str]) -> tuple[list[str], list[str], bool] | None:
     expanded: list[str] = []
     for line in lines:
-        if (match := _SECTION_PATTERN.fullmatch(line)) is not None:
-            expanded.append(" ".join(match[1].casefold().split()))
-            if match[2]:
-                expanded.append(match[2])
+        if (section := _section_caption(line)) is not None:
+            expanded.append(section[0])
+            if section[1]:
+                expanded.append(section[1])
         else:
             expanded.append(line)
     markers = [line.casefold() for line in expanded]
@@ -224,10 +229,12 @@ def _parse_waybill_recipient(
     if len(phones) > 1:
         issues.append(PageValidationIssue.AMBIGUOUS_RECIPIENT_PHONE)
     phone = next(iter(phones)) if len(phones) == 1 else None
-    # Without a phone delimiter or an address beginning before the final postcode,
-    # plain text cannot distinguish a wrapped name from an unlabelled locality.
+    # A numeric street line or postcode does not prove that all preceding lines
+    # belong to the name. Only a phone delimiter separates a multiline name
+    # from a digit-free locality without guessing from a locality dictionary.
     if address_index > 1 and (
-        address_index == len(remaining)
+        phone_boundary != address_index
+        or address_index == len(remaining)
         or (address_index == len(remaining) - 1 and re.fullmatch(r"[0-9]{6}", remaining[-1]))
     ):
         issues.append(PageValidationIssue.AMBIGUOUS_RECIPIENT)
