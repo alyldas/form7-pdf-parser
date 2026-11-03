@@ -123,6 +123,12 @@ def parse_tracking_number(text: str, lines: list[str] | None = None) -> str | No
     return next(iter(candidates)) if len(candidates) == 1 else None
 
 
+def _phone_digit_limit(number: str, digits: str) -> int:
+    if number.startswith("+") and not digits.startswith("7"):
+        return 0
+    return 11 if digits.startswith(("7", "8")) else 10
+
+
 def _parse_phone_line(line: str) -> str | None:
     match = _PHONE_LINE_PATTERN.fullmatch(line)
     if match is None:
@@ -130,11 +136,14 @@ def _parse_phone_line(line: str) -> str | None:
 
     number = match["number"]
     digits = re.sub(r"\D+", "", number)
-    if number.startswith("+"):
-        return digits[-10:] if digits.startswith("7") and len(digits) == 11 else None
-    if re.match(r"^[78](?:\s|\(|-)", number) and len(digits) != 11:
+    maximum_digits = _phone_digit_limit(number, digits)
+    if not maximum_digits:
         return None
-    if len(digits) == 11 and digits[0] in "78":
+    if number.startswith("+"):
+        return digits[-10:] if len(digits) == maximum_digits else None
+    if maximum_digits == 11 and re.match(r"^\d(?:\s|\(|-)", number) and len(digits) != 11:
+        return None
+    if len(digits) == maximum_digits == 11:
         return digits[-10:]
     if len(digits) == 10:
         return digits
@@ -184,12 +193,14 @@ def _waybill_phone(lines: list[str], index: int) -> tuple[str | None, int]:
     phone = _parse_phone_line(line)
     consumed = 1
     match = _PHONE_LINE_PATTERN.fullmatch(line)
-    if match is None or not (match["label"] is not None or match["number"].startswith(("+7", "8"))):
+    if match is None:
         return phone, consumed
 
     line = match["number"]
     digits = re.sub(r"\D+", "", line)
-    maximum_digits = 11 if digits.startswith(("7", "8")) else 10
+    maximum_digits = _phone_digit_limit(line, digits)
+    if not maximum_digits or (match["label"] is None and maximum_digits != 11):
+        return phone, consumed
     digit_count = len(digits)
     for end in range(index + 1, len(lines)):
         if digit_count >= maximum_digits:

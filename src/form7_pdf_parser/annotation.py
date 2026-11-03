@@ -12,8 +12,8 @@ from typing import BinaryIO
 
 import pypdfium2 as pdfium  # type: ignore[import-untyped]
 from pypdf import PageObject, PdfReader, PdfWriter
-from pypdf.errors import PdfReadError as PypdfReadError
-from pypdf.generic import DictionaryObject
+from pypdf.errors import PyPdfError
+from pypdf.generic import ArrayObject, DictionaryObject, FloatObject, NullObject, NumberObject
 from reportlab.pdfbase.pdfmetrics import registerFont, stringWidth
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen.canvas import Canvas
@@ -70,7 +70,8 @@ def _overlay_layout(width: float, height: float, label: str) -> tuple[float, flo
 
 def _prepare_overlay_layout(page: PageObject, label: str) -> tuple[float, float, float]:
     """Normalize fallback page rotation and calculate coordinates for the prepared page."""
-    if float(page.get("/UserUnit", 1)) != 1:
+    user_unit = page.get("/UserUnit", NumberObject(1)).get_object()
+    if not isinstance(user_unit, NullObject) and user_unit != 1:
         raise OverlayError("Custom PDF UserUnit is not supported for order label placement")
     anchors: list[tuple[str, float, float, float]] = []
 
@@ -137,13 +138,36 @@ def _check_overlay_space(page: PageObject, label: str, layout: tuple[float, floa
         0 <= left < right <= width and 0 <= bottom < top <= height
     ):
         raise OverlayError("Order label falls outside the visible page")
-    for reference in page.get("/Annots", []):
-        rect = reference.get_object().get("/Rect")
-        if rect and (
-            float(rect[0]) < right + float(page.cropbox.left)
-            and float(rect[2]) > left + float(page.cropbox.left)
-            and float(rect[1]) < top + float(page.cropbox.bottom)
-            and float(rect[3]) > bottom + float(page.cropbox.bottom)
+    annotations = page.get("/Annots", NullObject()).get_object()
+    if annotations is None or isinstance(annotations, NullObject):
+        annotations = ArrayObject()
+    if not isinstance(annotations, ArrayObject):
+        raise OverlayError("Unable to verify PDF annotation array")
+    for reference in annotations:
+        annotation = reference.get_object()
+        if not isinstance(annotation, DictionaryObject):
+            raise OverlayError("Unable to verify PDF annotation")
+        rect = annotation.get("/Rect", NullObject()).get_object()
+        if not isinstance(rect, ArrayObject) or len(rect) != 4:
+            raise OverlayError("Unable to verify PDF annotation bounds")
+        coordinates: list[float] = []
+        for value in rect:
+            number = value.get_object()
+            if not isinstance(number, (NumberObject, FloatObject)):
+                raise OverlayError("Unable to verify PDF annotation coordinates")
+            try:
+                coordinate = float(number)
+            except OverflowError as error:
+                raise OverlayError("Unable to verify PDF annotation coordinates") from error
+            if not isfinite(coordinate):
+                raise OverlayError("Unable to verify PDF annotation coordinates")
+            coordinates.append(coordinate)
+        x0, y0, x1, y1 = coordinates
+        if (
+            min(x0, x1) < right + float(page.cropbox.left)
+            and max(x0, x1) > left + float(page.cropbox.left)
+            and min(y0, y1) < top + float(page.cropbox.bottom)
+            and max(y0, y1) > bottom + float(page.cropbox.bottom)
         ):
             raise OverlayError("Order label area is occupied by an annotation")
     # Render only the protected rectangle, including its safety margin. This also
@@ -302,5 +326,5 @@ def annotate_pdf(
                 writer.write(handle)
                 handle.flush()
                 os.fsync(handle.fileno())
-    except (OSError, PypdfReadError) as error:
+    except (OSError, PyPdfError) as error:
         raise PdfReadError("Unable to annotate the PDF") from error

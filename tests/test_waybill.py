@@ -451,11 +451,11 @@ def test_waybill_ambiguous_prefix_is_not_accepted_as_part_of_name(
     [
         (prefix, label, after_address)
         for prefix, label, after_address in product(
-            ["+7", "8"], ["", "Тел.: ", "PHONE "], [False, True]
+            ["+7", "7", "8"], ["", "Тел.: ", "PHONE "], [False, True]
         )
         # After the address, six bare digits are a routing postcode; an explicit
         # plus or label is needed to distinguish every possible phone partition.
-        if not (after_address and prefix == "8" and not label)
+        if not (after_address and prefix in {"7", "8"} and not label)
     ],
 )
 def test_country_prefixed_phone_all_line_partitions(
@@ -505,3 +505,13 @@ def test_bare_six_digit_line_after_address_remains_a_postcode() -> None:
     assert page.recipient_address == "000000, Россия, г. Примерск, ул. Макетная, д. 0 800000"
     assert PageValidationIssue.MISSING_RECIPIENT_PHONE in page.validation_issues
     assert PageValidationIssue.CONFLICTING_POSTCODES in page.validation_issues
+
+
+@pytest.mark.parametrize("prefix", ["+7 ", "7 ", "8 ", "7-", "8-", "7(", "8("])
+@pytest.mark.parametrize("label", ["", "Тел.: "])
+def test_formatted_country_prefix_survives_line_breaks(prefix: str, label: str) -> None:
+    number = prefix + "000" + (")" if prefix.endswith("(") else "") + "\n000\n0000"
+
+    assert parse_page(WAYBILL_TEXT.replace("+7 000 000 0000", label + number), 1) == parse_page(
+        WAYBILL_TEXT, 1
+    )

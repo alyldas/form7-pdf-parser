@@ -11,7 +11,7 @@ from pypdf.generic import ArrayObject, DictionaryObject, FloatObject, NameObject
 from reportlab.lib.pagesizes import A4, A6
 from reportlab.pdfgen.canvas import Canvas
 
-from form7_pdf_parser import Overlay, OverlayError, annotate_pdf, parse_pdf
+from form7_pdf_parser import Overlay, OverlayError, PdfReadError, annotate_pdf, parse_pdf
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -301,3 +301,121 @@ def test_recipient_caption_variants_share_placement_guards(
 def test_unrelated_word_is_not_a_recipient_caption(tmp_path: Path) -> None:
     source = _pdf(tmp_path, recipient_y=790, recipient_caption="Комус")
     annotate_pdf(source, tmp_path / "out.pdf", [Overlay(1, "001234")])
+
+
+def _annotation_objects_pdf(
+    tmp_path: Path,
+    *,
+    annots: bytes = b"4 0 R",
+    rect: bytes = b"6 0 R",
+    coordinates: bytes = b"[20 20 40 40]",
+    unit: bytes = b"1",
+) -> Path:
+    # A minimal PDF keeps indirect arrays/numbers intact without private writer APIs.
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 300] /UserUnit 7 0 R /Annots "
+        + annots
+        + b" >>",
+        b"[5 0 R]",
+        b"<< /Type /Annot /Subtype /Link /Rect " + rect + b" /Border [0 0 0] >>",
+        coordinates,
+        unit,
+        b"280",
+        b"265",
+        b"310",
+        b"285",
+    ]
+    data = bytearray(b"%PDF-1.7\n")
+    offsets = [0]
+    for number, body in enumerate(objects, 1):
+        offsets.append(len(data))
+        data.extend(f"{number} 0 obj\n".encode() + body + b"\nendobj\n")
+    xref = len(data)
+    data.extend(f"xref\n0 {len(offsets)}\n0000000000 65535 f \n".encode())
+    for offset in offsets[1:]:
+        data.extend(f"{offset:010d} 00000 n \n".encode())
+    data.extend(
+        f"trailer\n<< /Size {len(offsets)} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode()
+    )
+    path = tmp_path / "objects.pdf"
+    path.write_bytes(data)
+    return path
+
+
+@pytest.mark.parametrize("annots", [b"[5 0 R]", b"4 0 R"])
+@pytest.mark.parametrize("indirect_rect", [False, True])
+@pytest.mark.parametrize("occupied", [False, True])
+def test_direct_and_indirect_annotation_geometry(
+    tmp_path: Path, annots: bytes, indirect_rect: bool, occupied: bool
+) -> None:
+    coordinates = b"[280 265 310 285]" if occupied else b"[20 20 40 40]"
+    source = _annotation_objects_pdf(
+        tmp_path,
+        annots=annots,
+        rect=b"6 0 R" if indirect_rect else coordinates,
+        coordinates=coordinates,
+    )
+    output = tmp_path / "out.pdf"
+    output.write_bytes(b"existing output")
+    if occupied:
+        with pytest.raises(OverlayError, match="occupied"):
+            annotate_pdf(source, output, [Overlay(1, "001234")])
+        assert output.read_bytes() == b"existing output"
+    else:
+        annotate_pdf(source, output, [Overlay(1, "001234")])
+        page = PdfReader(output).pages[0]
+        assert len(page.annotations) == 1
+        assert "Заказ № 001234" in page.extract_text()
+
+
+@pytest.mark.parametrize("coordinates", [b"[310 285 280 265]", b"[8 0 R 9 0 R 10 0 R 11 0 R]"])
+def test_reversed_and_indirect_coordinates_cannot_bypass_collision(
+    tmp_path: Path, coordinates: bytes
+) -> None:
+    source = _annotation_objects_pdf(tmp_path, coordinates=coordinates)
+    with pytest.raises(OverlayError, match="occupied"):
+        annotate_pdf(source, tmp_path / "out.pdf", [Overlay(1, "001234")])
+
+
+@pytest.mark.parametrize("rect", [b"null", b"[1 2 3]", b"[0 0 (bad) 1]"])
+def test_unverifiable_annotation_bounds_leave_output_unchanged(tmp_path: Path, rect: bytes) -> None:
+    source = _annotation_objects_pdf(tmp_path, rect=rect)
+    output = tmp_path / "out.pdf"
+    output.write_bytes(b"existing output")
+    with pytest.raises(OverlayError, match="annotation"):
+        annotate_pdf(source, output, [Overlay(1, "001234")])
+    assert output.read_bytes() == b"existing output"
+
+
+@pytest.mark.parametrize("annots", [b"null", b"[]"])
+def test_empty_annotation_arrays_are_supported(tmp_path: Path, annots: bytes) -> None:
+    source = _annotation_objects_pdf(tmp_path, annots=annots)
+    annotate_pdf(source, tmp_path / "out.pdf", [Overlay(1, "001234")])
+
+
+@pytest.mark.parametrize("annots", [b"42", b"[null]"])
+def test_invalid_annotation_objects_are_rejected(tmp_path: Path, annots: bytes) -> None:
+    source = _annotation_objects_pdf(tmp_path, annots=annots)
+    with pytest.raises(OverlayError, match="annotation"):
+        annotate_pdf(source, tmp_path / "out.pdf", [Overlay(1, "001234")])
+
+
+@pytest.mark.parametrize("unit", [b"null", b"0.5"])
+def test_indirect_page_units_are_resolved(tmp_path: Path, unit: bytes) -> None:
+    source = _annotation_objects_pdf(tmp_path, unit=unit)
+    if unit == b"null":
+        annotate_pdf(source, tmp_path / "out.pdf", [Overlay(1, "001234")])
+    else:
+        with pytest.raises(OverlayError, match="UserUnit"):
+            annotate_pdf(source, tmp_path / "out.pdf", [Overlay(1, "001234")])
+
+
+def test_overflowing_annotation_coordinates_are_rejected(tmp_path: Path) -> None:
+    source = _annotation_objects_pdf(tmp_path, coordinates=b"[" + b"9" * 400 + b" 0 1 1]")
+    output = tmp_path / "out.pdf"
+    output.write_bytes(b"existing output")
+    with pytest.raises(PdfReadError, match="Unable to annotate"):
+        annotate_pdf(source, output, [Overlay(1, "001234")])
+    assert output.read_bytes() == b"existing output"
