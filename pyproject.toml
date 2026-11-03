@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling>=1.27"]
+requires = ["hatchling>=1.33.0"]
 build-backend = "hatchling.build"
 
 [project]
@@ -25,19 +25,20 @@ classifiers = [
   "Typing :: Typed",
 ]
 dependencies = [
-  "pypdf>=6.14.2,<7",
-  "reportlab>=4.2,<6",
+  "pypdf>=6.21.4,<7",
+  "reportlab>=5.1.0,<6",
+  "pypdfium2>=5.14.0,<6",
 ]
 
 [project.optional-dependencies]
 dev = [
-  "build>=1.2",
-  "mypy>=1.15",
-  "pytest>=8.3",
-  "pytest-cov>=6",
-  "ruff>=0.11",
-  "twine>=6.1",
-  "types-reportlab>=4.4",
+  "build>=1.6.1",
+  "mypy>=2.4.1",
+  "pytest>=9.2.0",
+  "pytest-cov>=7.1.0",
+  "ruff>=0.17.3",
+  "twine>=7.0.0",
+  "types-reportlab>=5.0.0.20261008",
 ]
 
 [project.scripts]
@@ -74,6 +75,7 @@ select = ["B", "E", "F", "I", "RUF", "S", "SIM", "UP"]
 
 [tool.ruff.lint.per-file-ignores]
 "src/form7_pdf_parser/parsing.py" = ["RUF001"]
+"src/form7_pdf_parser/annotation.py" = ["RUF001"]
 "tests/**/*.py" = ["RUF001", "S101"]
 "tools/generate_fixture.py" = ["RUF001"]
 

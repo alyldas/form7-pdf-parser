@@ -9,6 +9,14 @@ class PageValidationIssue(StrEnum):
 
     MISSING_TRACKING_NUMBER = "missing_tracking_number"
     MISSING_RECIPIENT = "missing_recipient"
+    MISSING_RECIPIENT_NAME = "missing_recipient_name"
+    MISSING_RECIPIENT_PHONE = "missing_recipient_phone"
+    MISSING_RECIPIENT_ADDRESS = "missing_recipient_address"
+    MISSING_RECIPIENT_POSTCODE = "missing_recipient_postcode"
+    CONFLICTING_POSTCODES = "conflicting_postcodes"
+    AMBIGUOUS_RECIPIENT_PHONE = "ambiguous_recipient_phone"
+    MULTIPLE_SHIPMENTS = "multiple_shipments"
+    AMBIGUOUS_RECIPIENT = "ambiguous_recipient"
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,6 +31,7 @@ class ParsedPage:
     raw_text: str | None
     is_valid: bool
     validation_issues: tuple[PageValidationIssue, ...] = ()
+    recipient_postcode: str | None = None
 
     def as_dict(self) -> dict[str, object]:
         """Return the stable JSON shape, intentionally excluding diagnostic issues."""

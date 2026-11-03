@@ -12,15 +12,54 @@ _TRACKING_PATTERN = re.compile(
 )
 _AMOUNT_PATTERN = re.compile(r"\b(?:руб|коп)\b", flags=re.IGNORECASE)
 _PHONE_LINE_PATTERN = re.compile(
-    r"(?:(?:тел(?:ефон)?|phone)\.?\s*:?\s*)?\+?[0-9()\-\s]+",
+    r"(?:(?P<label>(?:тел(?:ефон)?|phone)\.?\s*:?)\s*)?(?P<number>\+?[0-9()\-\s]+)",
     flags=re.IGNORECASE,
 )
 _TRACKING_FRAGMENT_PATTERN = re.compile(r"[0-9][0-9\s-]*")
 _TRACKING_GROUP_LENGTHS = ((5, 7), (1, 3), (4, 6), (1, 1))
+_WAYBILL_TRACKING_PATTERN = re.compile(
+    r"^(?:[0-9]{14}|[0-9]{6}\s+[0-9]{2}\s+[0-9]{5}\s+[0-9])$",
+    flags=re.MULTILINE,
+)
+_SECTION_PATTERN = re.compile(r"^(от\s+кого|кому)(?:\s*:\s*|\s+|$)(.*)$", re.IGNORECASE)
+_POSTCODE_PATTERN = re.compile(r"(?<![0-9])[0-9]{6}(?![0-9])")
+_PHONE_DASHES = str.maketrans(dict.fromkeys("‐‑‒–—−", "-"))
 
 
 def normalize_lines(text: str) -> list[str]:
     return [line for raw in text.splitlines() if (line := re.sub(r"\s+", " ", raw).strip())]
+
+
+def _section_caption(text: str) -> tuple[str, str] | None:
+    match = _SECTION_PATTERN.fullmatch(" ".join(text.split()))
+    return (match[1].casefold(), match[2]) if match is not None else None
+
+
+def _waybill_sections(lines: list[str]) -> tuple[list[str], list[str], bool] | None:
+    expanded: list[str] = []
+    for line in lines:
+        if (section := _section_caption(line)) is not None:
+            expanded.append(section[0])
+            if section[1]:
+                expanded.append(section[1])
+        else:
+            expanded.append(line)
+    markers = [line.casefold() for line in expanded]
+    if "от кого" not in markers or "кому" not in markers:
+        return None
+    sender_index = markers.index("от кого")
+    recipient_index = markers.index("кому")
+    if sender_index >= recipient_index:
+        return None
+    header = expanded[:sender_index]
+    recipient = expanded[recipient_index + 1 :]
+    # Legacy forms can also contain sender/recipient captions. Require new-layout
+    # evidence before giving those captions priority over the legacy payment block.
+    legacy_payment = _TRACKING_MARKER.casefold() in " ".join(recipient).casefold()
+    if legacy_payment and not _WAYBILL_TRACKING_PATTERN.search("\n".join(header)):
+        return None
+    multiple = markers.count("от кого") > 1 or markers.count("кому") > 1
+    return header, recipient, multiple
 
 
 def _valid_tracking_number(parts: list[str] | tuple[str, ...]) -> str | None:
@@ -38,6 +77,16 @@ def _valid_tracking_number(parts: list[str] | tuple[str, ...]) -> str | None:
 
 def parse_tracking_number(text: str, lines: list[str] | None = None) -> str | None:
     """Best-effort extraction of one unambiguous 14-digit tracking number."""
+    normalized_lines = lines if lines is not None else normalize_lines(text)
+    if (sections := _waybill_sections(normalized_lines)) is not None:
+        if sections[2]:
+            return None
+        waybill_candidates = {
+            re.sub(r"\s+", "", match.group())
+            for match in _WAYBILL_TRACKING_PATTERN.finditer("\n".join(sections[0]))
+        }
+        return next(iter(waybill_candidates)) if len(waybill_candidates) == 1 else None
+
     direct_candidates = {
         candidate
         for match in _TRACKING_PATTERN.finditer(text)
@@ -46,7 +95,6 @@ def parse_tracking_number(text: str, lines: list[str] | None = None) -> str | No
     if direct_candidates:
         return next(iter(direct_candidates)) if len(direct_candidates) == 1 else None
 
-    normalized_lines = lines if lines is not None else normalize_lines(text)
     marker_index = next(
         (
             index
@@ -75,14 +123,27 @@ def parse_tracking_number(text: str, lines: list[str] | None = None) -> str | No
     return next(iter(candidates)) if len(candidates) == 1 else None
 
 
+def _phone_digit_limit(number: str, digits: str) -> int:
+    if number.startswith("+") and not digits.startswith("7"):
+        return 0
+    return 11 if digits.startswith(("7", "8")) else 10
+
+
 def _parse_phone_line(line: str) -> str | None:
-    if _PHONE_LINE_PATTERN.fullmatch(line) is None:
+    match = _PHONE_LINE_PATTERN.fullmatch(line)
+    if match is None:
         return None
 
-    digits = re.sub(r"\D+", "", line)
-    if "+" in line and not digits.startswith("7"):
+    number = match["number"]
+    digits = re.sub(r"\D+", "", number)
+    maximum_digits = _phone_digit_limit(number, digits)
+    if not maximum_digits:
         return None
-    if len(digits) == 11 and digits[0] in "78":
+    if number.startswith("+"):
+        return digits[-10:] if len(digits) == maximum_digits else None
+    if maximum_digits == 11 and re.match(r"^\d(?:\s|\(|-)", number) and len(digits) != 11:
+        return None
+    if len(digits) == maximum_digits == 11:
         return digits[-10:]
     if len(digits) == 10:
         return digits
@@ -101,10 +162,131 @@ def _find_amount_line(lines: list[str], phone_index: int, search_start: int) -> 
     return None
 
 
+def _waybill_content(lines: list[str]) -> list[str]:
+    content: list[str] = []
+    address_seen = False
+    phone_seen = False
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if re.fullmatch(r"(?:Order\s*#|Заказ\s*№)\s*[0-9]+", line, re.IGNORECASE):
+            break
+        if address_seen and re.fullmatch(r"[0-9]{6}", line):
+            content.append(line)
+            break
+        phone, consumed = _waybill_phone(lines, index)
+        content.append(line if phone is None else phone)
+        if phone is not None:
+            phone_seen = True
+        elif (
+            not re.fullmatch(r"[0-9]{6}", line)
+            and (phone_seen or re.search(r"[0-9]", line))
+            and not _PHONE_LINE_PATTERN.fullmatch(line.translate(_PHONE_DASHES))
+        ):
+            address_seen = True
+        index += consumed
+    return content
+
+
+def _waybill_phone(lines: list[str], index: int) -> tuple[str | None, int]:
+    line = lines[index].translate(_PHONE_DASHES)
+    phone = _parse_phone_line(line)
+    consumed = 1
+    match = _PHONE_LINE_PATTERN.fullmatch(line)
+    if match is None:
+        return phone, consumed
+
+    line = match["number"]
+    digits = re.sub(r"\D+", "", line)
+    maximum_digits = _phone_digit_limit(line, digits)
+    if not maximum_digits or (match["label"] is None and maximum_digits != 11):
+        return phone, consumed
+    digit_count = len(digits)
+    for end in range(index + 1, len(lines)):
+        if digit_count >= maximum_digits:
+            break
+        fragment = lines[end].translate(_PHONE_DASHES)
+        continuation = _PHONE_LINE_PATTERN.fullmatch(fragment)
+        if continuation is None or continuation["label"] is not None or "+" in fragment:
+            break
+        fragment_digits = re.sub(r"\D+", "", fragment)
+        if not fragment_digits or digit_count + len(fragment_digits) > maximum_digits:
+            break
+        # Do not invent prefix-separating whitespace at a line break.
+        line += fragment
+        digit_count += len(fragment_digits)
+        if (candidate := _parse_phone_line(line)) is not None:
+            phone = candidate
+            consumed = end - index + 1
+            # Prefer a complete eleven-digit country-prefixed number over a
+            # ten-digit intermediate candidate; retain national numbers otherwise.
+    return phone, consumed
+
+
+def _waybill_phones(lines: list[str]) -> tuple[list[str], set[str], int | None]:
+    remaining: list[str] = []
+    phones: set[str] = set()
+    phone_boundary = None
+    # Content processing consumes phone spans atomically but stops at a routing
+    # postcode before it can be joined to an unrelated numeric footer.
+    for line in _waybill_content(lines):
+        phone = _parse_phone_line(line.translate(_PHONE_DASHES))
+        if phone is not None:
+            phones.add(phone)
+            if phone_boundary is None:
+                phone_boundary = len(remaining)
+        else:
+            remaining.append(line)
+    return remaining, phones, phone_boundary
+
+
+def _parse_waybill_recipient(
+    lines: list[str],
+) -> tuple[str | None, str | None, str | None, tuple[PageValidationIssue, ...]]:
+    remaining, phones, phone_boundary = _waybill_phones(lines)
+    address_index = next(
+        (index for index, line in enumerate(remaining) if re.search(r"[0-9]", line)),
+        len(remaining),
+    )
+    if phone_boundary is not None:
+        address_index = min(address_index, phone_boundary)
+    issues: list[PageValidationIssue] = []
+    if len(phones) > 1:
+        issues.append(PageValidationIssue.AMBIGUOUS_RECIPIENT_PHONE)
+    phone = next(iter(phones)) if len(phones) == 1 else None
+    # A numeric street line or postcode does not prove that all preceding lines
+    # belong to the name. Only a phone delimiter separates a multiline name
+    # from a digit-free locality without guessing from a locality dictionary.
+    if address_index > 1 and (
+        phone_boundary != address_index
+        or address_index == len(remaining)
+        or (address_index == len(remaining) - 1 and re.fullmatch(r"[0-9]{6}", remaining[-1]))
+    ):
+        issues.append(PageValidationIssue.AMBIGUOUS_RECIPIENT)
+        return None, None, phone, tuple(issues)
+    name = _join_lines(remaining[:address_index])
+    address_lines = remaining[address_index:]
+
+    # The routing postcode is printed separately too. Preserve it if it differs
+    # from the address, rather than silently choosing between conflicting values.
+    if len(address_lines) > 1 and re.fullmatch(r"[0-9]{6}", address_lines[-1]):
+        postcode = address_lines[-1]
+        if re.search(rf"(?<![0-9]){postcode}(?![0-9])", " ".join(address_lines[:-1])):
+            address_lines = address_lines[:-1]
+
+    return name, _join_lines(address_lines), phone, tuple(issues)
+
+
 def parse_recipient_name_address_phone(
     lines: list[str],
 ) -> tuple[str | None, str | None, str | None]:
-    """Best-effort extraction of the recipient block ending in a supported phone line."""
+    """Prefer explicit waybill sections, then try the legacy phone-ending block."""
+    if (sections := _waybill_sections(lines)) is not None:
+        if sections[2]:
+            return None, None, None
+        name, address, phone, _ambiguous_phone = _parse_waybill_recipient(sections[1])
+        return name, address, phone
+
     phone_index: int | None = None
     phone_digits: str | None = None
 
@@ -152,11 +334,33 @@ def parse_page(text: str, page_number: int, *, include_raw_text: bool = False) -
     lines = normalize_lines(text)
     tracking_number = parse_tracking_number(text, lines)
     recipient_name, recipient_address, recipient_phone = parse_recipient_name_address_phone(lines)
+    postcodes = set(_POSTCODE_PATTERN.findall(recipient_address or ""))
+    recipient_postcode = next(iter(postcodes)) if len(postcodes) == 1 else None
     validation_issues = _page_validation_issues(
         tracking_number,
         recipient_name,
         recipient_phone,
     )
+    if (sections := _waybill_sections(lines)) is not None:
+        if sections[2]:
+            validation_issues = (PageValidationIssue.MULTIPLE_SHIPMENTS,)
+        else:
+            issues = list(validation_issues)
+            for missing, issue in (
+                (recipient_name is None, PageValidationIssue.MISSING_RECIPIENT_NAME),
+                (recipient_phone is None, PageValidationIssue.MISSING_RECIPIENT_PHONE),
+                (
+                    not recipient_address
+                    or not re.search(r"[^\W\d_]", recipient_address, re.UNICODE),
+                    PageValidationIssue.MISSING_RECIPIENT_ADDRESS,
+                ),
+                (not postcodes, PageValidationIssue.MISSING_RECIPIENT_POSTCODE),
+                (len(postcodes) > 1, PageValidationIssue.CONFLICTING_POSTCODES),
+            ):
+                if missing:
+                    issues.append(issue)
+            issues.extend(_parse_waybill_recipient(sections[1])[3])
+            validation_issues = tuple(issues)
 
     return ParsedPage(
         page_number=page_number,
@@ -167,4 +371,5 @@ def parse_page(text: str, page_number: int, *, include_raw_text: bool = False) -
         raw_text=text.strip() or None if include_raw_text else None,
         is_valid=not validation_issues,
         validation_issues=validation_issues,
+        recipient_postcode=recipient_postcode,
     )
