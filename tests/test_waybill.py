@@ -444,3 +444,64 @@ def test_waybill_ambiguous_prefix_is_not_accepted_as_part_of_name(
     assert page.recipient_name is None
     assert page.recipient_address is None
     assert page.recipient_phone == ("0000000000" if phone else None)
+
+
+@pytest.mark.parametrize(
+    "prefix,label,after_address",
+    [
+        (prefix, label, after_address)
+        for prefix, label, after_address in product(
+            ["+7", "8"], ["", "Тел.: ", "PHONE "], [False, True]
+        )
+        # After the address, six bare digits are a routing postcode; an explicit
+        # plus or label is needed to distinguish every possible phone partition.
+        if not (after_address and prefix == "8" and not label)
+    ],
+)
+def test_country_prefixed_phone_all_line_partitions(
+    label: str, prefix: str, after_address: bool
+) -> None:
+    expected = parse_page(WAYBILL_TEXT, 1)
+    # All 1,024 partitions after the prefix and between subscriber digits.
+    for breaks in product((False, True), repeat=10):
+        phone = label + prefix + "".join("\n0" if split else "0" for split in breaks)
+        text = WAYBILL_TEXT.replace("+7 000 000 0000\n", "")
+        insertion = "д. 0\n" if after_address else "Получатель Тестовый\n"
+        actual = parse_page(text.replace(insertion, insertion + phone + "\n"), 1)
+        assert actual == expected, (prefix, label, breaks)
+
+
+@pytest.mark.parametrize("label", ["Тел.: ", "PHONE "])
+@pytest.mark.parametrize("number", ["0000000000", "7000000000", "8000000000"])
+def test_labelled_national_phone_all_line_partitions(label: str, number: str) -> None:
+    expected = parse_page(WAYBILL_TEXT.replace("+7 000 000 0000", number), 1)
+    # All 512 partitions, including compact national numbers beginning in 7/8.
+    for breaks in product((False, True), repeat=9):
+        phone = (
+            label
+            + number[0]
+            + "".join(
+                ("\n" if split else "") + digit
+                for split, digit in zip(breaks, number[1:], strict=True)
+            )
+        )
+        actual = parse_page(WAYBILL_TEXT.replace("+7 000 000 0000", phone), 1)
+        assert actual == expected, (number, label, breaks)
+
+
+@pytest.mark.parametrize("footer", ["0000", "00000", "0000000000"])
+def test_routing_postcode_is_not_joined_to_numeric_footer(footer: str) -> None:
+    text = WAYBILL_TEXT.rsplit("000000\n", 1)[0] + "800000\n"
+
+    assert parse_page(text + footer + "\n", 1) == parse_page(text, 1)
+
+
+def test_bare_six_digit_line_after_address_remains_a_postcode() -> None:
+    text = WAYBILL_TEXT.replace("+7 000 000 0000\n", "")
+    text = text.rsplit("000000\n", 1)[0] + "800000\n00000\n"
+    page = parse_page(text, 1)
+
+    assert page.recipient_phone is None
+    assert page.recipient_address == "000000, Россия, г. Примерск, ул. Макетная, д. 0 800000"
+    assert PageValidationIssue.MISSING_RECIPIENT_PHONE in page.validation_issues
+    assert PageValidationIssue.CONFLICTING_POSTCODES in page.validation_issues

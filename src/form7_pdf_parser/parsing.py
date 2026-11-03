@@ -124,11 +124,15 @@ def parse_tracking_number(text: str, lines: list[str] | None = None) -> str | No
 
 
 def _parse_phone_line(line: str) -> str | None:
-    if _PHONE_LINE_PATTERN.fullmatch(line) is None:
+    match = _PHONE_LINE_PATTERN.fullmatch(line)
+    if match is None:
         return None
 
-    digits = re.sub(r"\D+", "", line)
-    if "+" in line and not digits.startswith("7"):
+    number = match["number"]
+    digits = re.sub(r"\D+", "", number)
+    if number.startswith("+"):
+        return digits[-10:] if digits.startswith("7") and len(digits) == 11 else None
+    if re.match(r"^[78](?:\s|\(|-)", number) and len(digits) != 11:
         return None
     if len(digits) == 11 and digits[0] in "78":
         return digits[-10:]
@@ -153,58 +157,68 @@ def _waybill_content(lines: list[str]) -> list[str]:
     content: list[str] = []
     address_seen = False
     phone_seen = False
-    for line in lines:
+    index = 0
+    while index < len(lines):
+        line = lines[index]
         if re.fullmatch(r"(?:Order\s*#|Заказ\s*№)\s*[0-9]+", line, re.IGNORECASE):
             break
-        content.append(line)
-        if re.fullmatch(r"[0-9]{6}", line):
-            if address_seen:
-                break
-        elif _parse_phone_line(line.translate(_PHONE_DASHES)) is not None:
+        if address_seen and re.fullmatch(r"[0-9]{6}", line):
+            content.append(line)
+            break
+        phone, consumed = _waybill_phone(lines, index)
+        content.append(line if phone is None else phone)
+        if phone is not None:
             phone_seen = True
-        elif (phone_seen or re.search(r"[0-9]", line)) and not _PHONE_LINE_PATTERN.fullmatch(
-            line.translate(_PHONE_DASHES)
+        elif (
+            not re.fullmatch(r"[0-9]{6}", line)
+            and (phone_seen or re.search(r"[0-9]", line))
+            and not _PHONE_LINE_PATTERN.fullmatch(line.translate(_PHONE_DASHES))
         ):
             address_seen = True
+        index += consumed
     return content
 
 
-def _join_waybill_phones(lines: list[str]) -> list[str]:
-    joined: list[str] = []
-    index = 0
-    while index < len(lines):
-        line = lines[index].translate(_PHONE_DASHES)
-        phone = _parse_phone_line(line)
-        consumed = 1
-        # Join only numeric phone fragments; never consume an address line.
-        match = _PHONE_LINE_PATTERN.fullmatch(line)
-        if (
-            phone is None
-            and match is not None
-            and (match["label"] is not None or re.match(r"^(?:\+7|8)\b", match["number"]))
-        ):
-            line = match["number"]
-            for end in range(index + 1, min(index + 3, len(lines))):
-                fragment = lines[end].translate(_PHONE_DASHES)
-                continuation = _PHONE_LINE_PATTERN.fullmatch(fragment)
-                if continuation is None or continuation["label"] is not None:
-                    break
-                line += " " + fragment
-                if (phone := _parse_phone_line(line)) is not None:
-                    consumed = end - index + 1
-                    break
-        joined.append(lines[index] if phone is None else phone)
-        index += consumed
-    return joined
+def _waybill_phone(lines: list[str], index: int) -> tuple[str | None, int]:
+    line = lines[index].translate(_PHONE_DASHES)
+    phone = _parse_phone_line(line)
+    consumed = 1
+    match = _PHONE_LINE_PATTERN.fullmatch(line)
+    if match is None or not (match["label"] is not None or match["number"].startswith(("+7", "8"))):
+        return phone, consumed
+
+    line = match["number"]
+    digits = re.sub(r"\D+", "", line)
+    maximum_digits = 11 if digits.startswith(("7", "8")) else 10
+    digit_count = len(digits)
+    for end in range(index + 1, len(lines)):
+        if digit_count >= maximum_digits:
+            break
+        fragment = lines[end].translate(_PHONE_DASHES)
+        continuation = _PHONE_LINE_PATTERN.fullmatch(fragment)
+        if continuation is None or continuation["label"] is not None or "+" in fragment:
+            break
+        fragment_digits = re.sub(r"\D+", "", fragment)
+        if not fragment_digits or digit_count + len(fragment_digits) > maximum_digits:
+            break
+        # Do not invent prefix-separating whitespace at a line break.
+        line += fragment
+        digit_count += len(fragment_digits)
+        if (candidate := _parse_phone_line(line)) is not None:
+            phone = candidate
+            consumed = end - index + 1
+            # Prefer a complete eleven-digit country-prefixed number over a
+            # ten-digit intermediate candidate; retain national numbers otherwise.
+    return phone, consumed
 
 
 def _waybill_phones(lines: list[str]) -> tuple[list[str], set[str], int | None]:
     remaining: list[str] = []
     phones: set[str] = set()
     phone_boundary = None
-    # Join before detecting the routing postcode: a six-digit phone fragment
-    # must not terminate the recipient block and hide a conflicting postcode.
-    for line in _waybill_content(_join_waybill_phones(lines)):
+    # Content processing consumes phone spans atomically but stops at a routing
+    # postcode before it can be joined to an unrelated numeric footer.
+    for line in _waybill_content(lines):
         phone = _parse_phone_line(line.translate(_PHONE_DASHES))
         if phone is not None:
             phones.add(phone)

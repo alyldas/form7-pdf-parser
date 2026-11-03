@@ -153,6 +153,23 @@ def test_parse_recipient_rejects_plus_eight_phone_prefix() -> None:
     assert parse_recipient_name_address_phone(["+8 (000) 000-00-00"]) == (None, None, None)
 
 
+@pytest.mark.parametrize("prefix", ["+7", "7 ", "8 ", "8-"])
+@pytest.mark.parametrize("subscriber_length", [8, 9, 11])
+def test_explicit_country_prefix_requires_ten_subscriber_digits(
+    prefix: str, subscriber_length: int
+) -> None:
+    assert parse_recipient_name_address_phone([prefix + "0" * subscriber_length]) == (
+        None,
+        None,
+        None,
+    )
+
+
+@pytest.mark.parametrize("number", ["7000000000", "8000000000"])
+def test_compact_national_ten_digit_numbers_remain_supported(number: str) -> None:
+    assert parse_recipient_name_address_phone([number]) == (None, None, number)
+
+
 def test_invalid_page_has_stable_null_fields() -> None:
     page = parse_page("Synthetic page without shipping data", 2)
 

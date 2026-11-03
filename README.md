@@ -31,6 +31,10 @@ and legacy Form 7 PDFs and adding order labels to their pages.
 - Waybill recipients are read under `КОМУ`, including wrapped names and phone numbers,
   inline section captions, Unicode phone dashes, and phones before or after the address.
   An initial standalone postcode is retained; a postcode after the address ends the block.
+  Explicit `+7` or separated `7`/`8` phone prefixes require eleven digits in total.
+  Numeric phone fragments may span multiple lines without a fixed three-line limit.
+  After the address, six bare digits are a routing postcode; use `+7` or a phone label
+  to distinguish a wrapped phone that would otherwise start with six bare digits.
   Trailing `Заказ № ...` and older `Order #...` labels are excluded when the routing postcode is absent.
   Names and addresses are separated by phone/postcode and numeric address boundaries,
   not a dictionary of locality names. An unresolved wrapped-name/address boundary is
