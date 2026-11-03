@@ -12,14 +12,20 @@ from form7_pdf_parser.cli import MAX_OVERLAY_JSON_SIZE, _load_overlays, build_pa
 FIXTURE = Path(__file__).parent / "fixtures" / "synthetic-form7.pdf"
 
 
-def test_parse_command_writes_privacy_safe_json(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "source, page_count",
+    [(FIXTURE, 2), (FIXTURE.with_name("synthetic-waybill.pdf"), 1)],
+)
+def test_parse_command_writes_privacy_safe_json(
+    tmp_path: Path, source: Path, page_count: int
+) -> None:
     output = tmp_path / "result.json"
 
-    exit_code = main(["parse", "--input", str(FIXTURE), "--output", str(output)])
+    exit_code = main(["parse", "--input", str(source), "--output", str(output)])
 
     payload = json.loads(output.read_text(encoding="utf-8"))
     assert exit_code == 0
-    assert payload["page_count"] == 2
+    assert payload["page_count"] == page_count
     assert payload["pages"][0]["raw_text"] is None
     if os.name == "posix":
         assert stat.S_IMODE(output.stat().st_mode) == 0o600
@@ -63,7 +69,7 @@ def test_annotate_command_writes_pdf(tmp_path: Path) -> None:
     overlay = tmp_path / "overlay.json"
     output = tmp_path / "annotated.pdf"
     overlay.write_text(
-        json.dumps({"overlays": [{"page_number": 1, "order_label": "Order #6904"}]}),
+        json.dumps({"overlays": [{"page_number": 1, "order_label": "6904"}]}),
         encoding="utf-8",
     )
 

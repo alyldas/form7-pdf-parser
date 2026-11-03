@@ -1,7 +1,7 @@
 # Form 7 PDF Parser
 
-A small, typed Python library and command-line tool for parsing text-based Form 7 shipping
-PDFs and adding order labels to their pages.
+A small, typed Python library and command-line tool for parsing text-based shipping waybills
+and legacy Form 7 PDFs and adding order labels to their pages.
 
 > [!IMPORTANT]
 > This is an unofficial project. It is not affiliated with, endorsed by, or supported by
@@ -9,9 +9,11 @@ PDFs and adding order labels to their pages.
 
 ## Features
 
+- Prioritizes waybills with explicit `ОТ КОГО` / `КОМУ` sections; retains legacy Form 7 parsing.
 - Extracts recipient name, phone, address, and a 14-digit tracking number.
 - Processes multi-page PDFs and returns stable JSON.
-- Adds sanitized order labels without using private `pypdf` APIs.
+- Adds `Заказ № <number>` in the free header area of either supported layout.
+- Renders the proposed label area to detect existing text, lines, images, and annotations.
 - Writes JSON and PDFs atomically with owner-only `0600` permissions on POSIX and
   best-effort private permissions on Windows.
 - Applies default limits of 100 MiB and 500 pages.
@@ -24,6 +26,17 @@ PDFs and adding order labels to their pages.
 - Scanned documents require OCR before they can be parsed; OCR is not included.
 - Parsing is heuristic because PDF text layout can vary between generators.
 - Only 14-digit tracking numbers are accepted.
+- Waybill tracking must appear before `ОТ КОГО`, as 14 contiguous digits or groups of
+  6, 2, 5, and 1 digits. Conflicting tracking numbers are rejected.
+- Waybill recipients are read under `КОМУ`, including wrapped names and phone numbers,
+  inline section captions, Unicode phone dashes, and phones before or after the address.
+  An initial standalone postcode is retained; a postcode after the address ends the block.
+  Trailing `Заказ № ...` and older `Order #...` labels are excluded when the routing postcode is absent.
+  Names and addresses are separated by phone/postcode and numeric address boundaries,
+  not a dictionary of locality names. An unresolved wrapped-name/address boundary is
+  reported as `ambiguous_recipient` instead of guessed.
+  Repeated routing postcodes are removed only when they already appear in the address;
+  different postcodes are preserved without choosing which one is correct.
 - Rotated pages containing interactive annotations must be flattened before adding labels.
 
 ## Installation
@@ -68,7 +81,7 @@ Add labels using an overlay file:
 ```json
 {
   "overlays": [
-    { "page_number": 1, "order_label": "Order #6904" }
+    { "page_number": 1, "order_label": "6904" }
   ]
 }
 ```
@@ -80,10 +93,22 @@ form7-pdf annotate \
   --output annotated.pdf
 ```
 
-Labels retain ASCII letters, digits, spaces, `#`, `-`, `_`, and `/`. Other characters are
-removed, empty normalized labels are ignored, and normalized labels longer than 64 characters
-are rejected. Labels shrink down to 8 pt when needed to fit the visible page area; labels that
-still do not fit are rejected instead of being clipped.
+Pass the order number as an ASCII digit string; leading zeros are preserved. An existing
+`Заказ №` prefix is accepted and normalized, but other text and separators are rejected.
+Five- and six-digit order numbers are supported, including leading zeros. Numbers longer
+than 64 digits are rejected. Empty strings are ignored. No additional barcode is generated.
+
+The library embeds Noto Sans Bold and prints `Заказ № <number>`. Compact waybills use the
+header to the right of the logo, even on an A4 sheet; Form 7 uses the free area beside the
+title. Header anchors adapt to scaling and CropBox offsets. Labels shrink from 12 pt down
+to 8 pt if needed, and remain at least 7 mm above a detected recipient caption. Pages without
+a recognized header use the previous top-right placement, subject to the same space check.
+
+Before writing, PDFium renders the proposed area at 216 dpi with a 2 pt safety margin.
+Any visible content in that area causes `OverlayError`; the library never erases an existing
+number or searches for an arbitrary alternative position. Labels outside the visible page,
+unfittable labels, and multiple forms on one page are rejected. On failure, an existing output
+file remains unchanged. These checks verify placement, not postal acceptance of every PDF.
 
 Successful commands return `0`, processing failures return `1`, and invalid command-line
 arguments return `2`. Errors are written to standard error.
@@ -106,13 +131,19 @@ for page in result.pages:
 annotate_pdf(
     "form7.pdf",
     "annotated.pdf",
-    [Overlay(page_number=1, order_label="Order #6904")],
+    [Overlay(page_number=1, order_label="6904")],
 )
 ```
 
 Invalid Python results expose typed `validation_issues` values such as
-`missing_tracking_number` and `missing_recipient`. They are intentionally omitted from the
-stable JSON contract below; JSON consumers can continue to rely on `is_valid`.
+`missing_tracking_number` and `missing_recipient`. Waybills additionally require a recipient
+name, phone, address, and postcode. Missing fields, conflicting phones/postcodes, and multiple
+shipments on one page make `is_valid` false. Legacy Form 7 validation remains unchanged.
+
+Python results expose `recipient_postcode` when the address contains one unambiguous postcode;
+it is `None` when missing or conflicting. Both conflicting values remain in the address.
+The postcode and diagnostics are intentionally omitted from the stable JSON contract below;
+JSON consumers can use `recipient_address` and `is_valid`.
 
 The JSON contract is intentionally small and stable:
 
@@ -136,6 +167,11 @@ The JSON contract is intentionally small and stable:
 The package also exports the lower-level `parse_page`, `parse_tracking_number`, and
 `parse_recipient_name_address_phone` helpers for advanced integrations. These functions are
 best-effort text heuristics; prefer `parse_pdf` when processing complete documents.
+
+Formats are detected per page, so one PDF can contain both layouts. Explicit waybill
+sections take priority when the header contains tracking or no legacy recipient payment
+block is present. Sender details are never used as a fallback for an empty `КОМУ` section.
+The JSON fields are the same for both formats.
 
 ## Privacy and security
 
