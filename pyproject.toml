@@ -26,7 +26,7 @@ classifiers = [
 ]
 dependencies = [
   "fonttools>=4.68.0,<5",
-  "pypdf>=6.21.4,<7",
+  "pypdf>=6.21.4,<8",
   "reportlab>=5.1.0,<6",
   "pypdfium2>=5.14.0,<6",
 ]
